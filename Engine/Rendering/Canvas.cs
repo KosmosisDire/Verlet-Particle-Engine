@@ -22,26 +22,26 @@ public class Canvas
     ReadWriteBuffer<uint> bitmapBuffer;
     readonly Sprite renderSprite;
 
-    public Canvas(string name, int width = 1920, int height = 1080)
+    public Canvas(string name, Loop drawLoop, int width = 1920, int height = 1080, bool fullscreen = false)
     {
         this.width = width;
         this.height = height;
-        window = new RenderWindow(new VideoMode((uint)width, (uint)height), name, Styles.Fullscreen);
+        window = new RenderWindow(new VideoMode((uint)width, (uint)height), name, fullscreen ? Styles.Fullscreen : Styles.Default);
         window.SetVerticalSyncEnabled(true);
         window.SetFramerateLimit(144);
 
-        window.Closed += (obj, e) => { window.Close(); EngineLoop.Quit();};
+        window.Closed += (obj, e) => { window.Close(); EngineLoop.StopAllLoops();};
         window.KeyPressed += (sender, e) =>
         {
             if(sender == null) return;
             Window window = (Window)sender;
             if (e.Code == Keyboard.Key.Escape)
             {
-                EngineLoop.Quit();
+                EngineLoop.StopAllLoops();
                 window.Close();
             }
         };
-        window.MouseMoved += (sender, e) => mousePosition = new float2(e.X, e.Y);
+        window.MouseMoved += (sender, e) => mousePosition = Mouse.GetPosition(window).ToFloat2();
 
         renderSprite = new Sprite(new Texture(new Image((uint)width, (uint)height)));
 
@@ -51,7 +51,7 @@ public class Canvas
 
         bitmapBuffer = GraphicsDevice.GetDefault().AllocateReadWriteBuffer(blankData);
         
-        EngineLoop.Update += UpdateCanvas;
+        drawLoop.Connect(UpdateCanvas);
         
         GUIManager.window = window;
     }
@@ -67,8 +67,13 @@ public class Canvas
         window.Clear();
         ApplyBitmap();
         window.Draw(renderSprite);
-        GUIManager.Update();
+        GUIManager.Update(dt);
         window.Display();
+    }
+
+    public Vector2f GetMousePosition()
+    {
+        return ((Vector2f)Mouse.GetPosition(window));
     }
 
     public void ApplyBitmap()
@@ -82,59 +87,159 @@ public class Canvas
         bitmapDataInt = bytes;
     }
 
-    public void ClearBitmapBuffer()
+    public void Clear()
     {
+        blankData.CopyTo(bitmapDataInt, 0);
         bitmapBuffer.CopyFrom(blankData);
     }
 
-    public void ApplyBitmapBuffer()
+    public void ApplyGPUDraw()
     {
         bitmapBuffer.CopyTo(bitmapDataInt);
     }
 
+    public void ApplyCPUDraw()
+    {
+        bitmapBuffer.CopyFrom(bitmapDataInt);
+    }
+
     public void DrawCircles(ReadWriteBuffer<float2> positions, ReadOnlyBuffer<uint> colors, ReadOnlyBuffer<int> active, float radius)
     {
-        GraphicsDevice.GetDefault().For(positions.Length, new DrawCirclesKernel(positions, colors, bitmapBuffer, active, new int2(width, height), viewCamera.RectBounds, radius, true));
+        GraphicsDevice.GetDefault().For(positions.Length, new DrawCirclesKernel(positions, colors, bitmapBuffer, active, new int2(width, height), viewCamera.RectBoundsWorld, radius, true));
     }
 
     public void DrawLines(ReadWriteBuffer<float2> positions, ReadOnlyBuffer<int4> links)
     {
-        GraphicsDevice.GetDefault().For(links.Length, new DrawLinksKernel(links, positions, bitmapBuffer, new int2(width, height), viewCamera.RectBounds));
+        GraphicsDevice.GetDefault().For(links.Length, new DrawLinksKernel(links, positions, bitmapBuffer, new int2(width, height), viewCamera.RectBoundsWorld, 0xe4b28fFF));
+    }
+
+    public void DrawLines(Vector2f[] starts, Vector2f[] ends, Color color)
+    {
+        if(starts.Length != ends.Length) throw new Exception("Starts and ends must be the same length");
+
+        // create positions and links buffers from arrays
+        // positions contains all start and end points
+        // links contains the indices of the start and end points on x and y. z and w are unused for this since we do not need active flags or target lengths
+
+        float2[] positionsArray = new float2[starts.Length + ends.Length];
+        int4[] linksArray = new int4[starts.Length];
+
+        for (var i = 0; i < starts.Length; i++)
+        {
+            positionsArray[i] = starts[i].ToFloat2();
+            positionsArray[i + starts.Length] = ends[i].ToFloat2();
+            linksArray[i] = new int4(i, i + starts.Length, 0, 0);
+        }
+
+        var positions = GraphicsDevice.GetDefault().AllocateReadWriteBuffer(positionsArray);
+        var links = GraphicsDevice.GetDefault().AllocateReadOnlyBuffer(linksArray);
+
+        GraphicsDevice.GetDefault().For(links.Length, new DrawLinksKernel(links, positions, bitmapBuffer, new int2(width, height), viewCamera.RectBoundsWorld, color.ToInteger()));
+    
+        positions.Dispose();
+        links.Dispose();
     }
 
     public void DrawPixelCPU(Vector2f pos, Color color)
     {
-        int x = (int)pos.X;
-        int y = (int)pos.Y;
-        if (x < 0 || x >= width || y < 0 || y >= height) return;
-        bitmapDataInt[x + y * width] = Utils.RGBAToInt(color.R, color.G, color.B, color.A);
+        if (pos.X < 0 || pos.X >= width || pos.Y < 0 || pos.Y >= height) return;
+        bitmapDataInt[(int)pos.X + (int)pos.Y * width] = Utils.RGBAToInt(color.R, color.G, color.B, color.A);
     }
+
+
+    // public void DrawLineCPU(Vector2f start, Vector2f end, Color color, int dottedInterval = 0)
+    // {
+    //     //adjust for camera bounds
+    //     start = viewCamera.WorldToScreen(start);
+    //     end = viewCamera.WorldToScreen(end);
+
+    //     var x1 = (int)start.X;
+    //     var y1 = (int)start.Y;
+    //     var x2 = (int)end.X;
+    //     var y2 = (int)end.Y;
+
+    //     int dx = Math.Abs(x2 - x1);
+    //     int dy = Math.Abs(y2 - y1);
+    //     int sx = x1 < x2 ? 1 : -1;
+    //     int sy = y1 < y2 ? 1 : -1;
+    //     int err = dx - dy;
+
+    //     int flatIndex = 0;
+    //     while(true) 
+    //     {
+    //         // Plot the current point (x1, y1)
+    //         if (dottedInterval == 0 || (flatIndex / dottedInterval) % 2 == 0)
+    //         {
+    //             DrawPixelCPU(new Vector2f(x1, y1), color);
+    //         }
+
+    //         flatIndex++;
+
+    //         if (x1 == x2 && y1 == y2) {
+    //             break;
+    //         }
+
+    //         int e2 = 2 * err;
+    //         if (e2 > -dy) {
+    //             err -= dy;
+    //             x1 += sx;
+    //         }
+
+    //         if (e2 < dx) {
+    //             err += dx;
+    //             y1 += sy;
+    //         }
+    //     }
+    // }
 
     public void DrawLineCPU(Vector2f start, Vector2f end, Color color, int dottedInterval = 0)
     {
-        //adjust for camera bounds
-        start = viewCamera.WorldToScreen(start);
-        end = viewCamera.WorldToScreen(end);
+        var startScreen = viewCamera.WorldToScreen(start);
+        var endScreen = viewCamera.WorldToScreen(end);
 
-        Vector2f delta = end - start;
-        float length = delta.Length();
-        delta /= length;
-        bool draw = true;
-        for (int i = 0; i < length; i++)
+        var x1 = (int)startScreen.X;
+        var y1 = (int)startScreen.Y;
+        var x2 = (int)endScreen.X;
+        var y2 = (int)endScreen.Y;
+
+        int dx = Math.Abs(x2 - x1);
+        int dy = Math.Abs(y2 - y1);
+        int sx = x1 < x2 ? 1 : -1;
+        int sy = y1 < y2 ? 1 : -1;
+        int err = dx - dy;
+
+        int flatIndex = 0;
+        while (true)
         {
-            if(draw)
+            if (dottedInterval == 0 || (flatIndex / dottedInterval) % 2 == 0)
             {
-                Vector2f pos = start + delta * i;
-                DrawPixelCPU(pos, color);
+                DrawPixelCPU(new Vector2f(x1, y1), color);
             }
 
-            if(dottedInterval > 0)
+            flatIndex++;
+
+            if (x1 == x2 && y1 == y2)
             {
-                if(i % dottedInterval == 0)
-                    draw = !draw;
+                break;
+            }
+
+            int e2 = 2 * err;
+            if (e2 > -dy)
+            {
+                err -= dy;
+                x1 += sx;
+            }
+
+            if (e2 < dx)
+            {
+                err += dx;
+                y1 += sy;
             }
         }
     }
+
+    
+
 
     public void DrawCircleCPU(Vector2f pos, float radius, Color color)
     {
@@ -174,22 +279,25 @@ public class Canvas
         }
     }
 
-    public void DrawParticleSystem(ParticleSystem system, bool debugTime = false, bool drawBounds = true)
+    public void DrawParticleSystem(ParticleSystem particleSystem)
     {
-        system.CopyColorsToGPU();
-        
-        ClearBitmapBuffer();
-        DrawCircles(system.GetGPUPositions(), system.GetGPUColors(), system.GetGPUActive(), system.particleRadius);
-        DrawLines(system.GetGPUPositions(), system.GetGPULinks());
-        ApplyBitmapBuffer();
-        
-        if (drawBounds)
-        {
-            DrawLineCPU(new Vector2f(0, 0), new Vector2f(system.worldExtents.X, 0), Color.Blue, 10);
-            DrawLineCPU(new Vector2f(system.worldExtents.X, 0), new Vector2f(system.worldExtents.X, system.worldExtents.Y), Color.Blue, 10);
-            DrawLineCPU(new Vector2f(system.worldExtents.X, system.worldExtents.Y), new Vector2f(0, system.worldExtents.Y), Color.Blue, 10);
-            DrawLineCPU(new Vector2f(0, system.worldExtents.Y), new Vector2f(0, 0), Color.Blue, 10);
-        }
+        lock(particleSystem.colorsCPU) particleSystem.CopyColorsToGPU();
+
+        var gpuPositions = particleSystem.GetGPUPositions();
+        var gpuLinks = particleSystem.GetGPULinks();
+        var gpuColors = particleSystem.GetGPUColors();
+        var gpuActive = particleSystem.GetGPUActive();
+
+        DrawLines(gpuPositions, gpuLinks);
+        DrawCircles(gpuPositions, gpuColors, gpuActive, particleSystem.particleRadius);
+    }
+
+    public void DrawParticleSystemBounds(ParticleSystem particleSystem, Color color)
+    {
+        DrawLineCPU(new Vector2f(0, 0), new Vector2f(particleSystem.worldExtents.X, 0), color, 20);
+        DrawLineCPU(new Vector2f(particleSystem.worldExtents.X, 0), new Vector2f(particleSystem.worldExtents.X, particleSystem.worldExtents.Y), color, 20);
+        DrawLineCPU(new Vector2f(particleSystem.worldExtents.X, particleSystem.worldExtents.Y), new Vector2f(0, particleSystem.worldExtents.Y), color, 20);
+        DrawLineCPU(new Vector2f(0, particleSystem.worldExtents.Y), new Vector2f(0, 0), color, 20);
     }
 
 }

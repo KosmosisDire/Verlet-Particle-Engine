@@ -24,6 +24,7 @@ internal readonly partial struct IntegrationKernel : IComputeShader
     public readonly float dt;
     public readonly float2 gravity;
     public readonly float antiPressurePower;
+    public readonly int iterations;
     #endregion
 
     public void Execute()
@@ -33,9 +34,10 @@ internal readonly partial struct IntegrationKernel : IComputeShader
         if(id >= positions.Length) return;
         if (active[id] == 0) return;
 
-        Integrate(id, dt);
+        Integrate(id, dt/iterations);
+
         
-        for(int i = 0; i < 15; i++)
+        for(int i = 0; i < iterations; i++)
         {
             Collisions(id);
             ApplyBoundary(id);
@@ -46,22 +48,17 @@ internal readonly partial struct IntegrationKernel : IComputeShader
     {
         float2 pos = positions[id];
         float2 lastPos = lastPositions[id];
-        float2 velocity = (pos - lastPos);
+        float2 velocity = pos - lastPos;
         float velocityMag = Hlsl.Length(velocity);
 
-        float inertia = 1.0f + (travelDistances[id]) / (velocityMag + 1.0f);
-        float antiPressure = (float)Hlsl.Pow(1.0f / inertia, 2);
-
-        lastPositions[id] -= gravity * _dt * _dt * antiPressure;
-
-        lastPos = lastPositions[id];
-        velocity = (pos - lastPos);
-
         lastPositions[id] = pos;
+
+        float inertia = 1.0f + travelDistances[id] / (velocityMag + 1.0f);
+        float antiPressure = (float)Hlsl.Pow(1.0f / inertia, 1.1f);
+
+        positions[id] += velocity * (1 - (antiPressurePower * (1-antiPressure))) + (gravity * antiPressure - velocity * 20) * _dt * _dt;
         
-        positions[id] += velocity * 0.98f * (1 - (antiPressurePower * (1-antiPressure)));
-        
-        var travelRetention = 0.75f;
+        var travelRetention = 0.1f;
         travelDistances[id] *= travelRetention;
     }
 
@@ -72,7 +69,7 @@ internal readonly partial struct IntegrationKernel : IComputeShader
 
         float2 pos = positions[id];
         float2 edgeDist = new float2(pos.X % cellSize.X, pos.Y % cellSize.Y);
-        bool isEdge = Hlsl.Any(edgeDist < radius * 1.1f) || Hlsl.Any(edgeDist > cellSize - radius * 1.2f);
+        bool isEdge = Hlsl.Any(edgeDist < radius * 2f) || Hlsl.Any(edgeDist > cellSize - radius * 2f);
 
         // 9 iterations for a 3x3 grid
         for(int i = 0; i < 9; i++)
@@ -85,7 +82,7 @@ internal readonly partial struct IntegrationKernel : IComputeShader
                 continue;
             }
 
-            if(!isEdge && i != 4)
+            if(!isEdge && i != 4) // only check adjacent cells for edge particles.
             {
                 continue;
             }
@@ -103,47 +100,25 @@ internal readonly partial struct IntegrationKernel : IComputeShader
         }
     }
 
-
+    const float epsilon = 0.0001f;
     void SolveCollision(int obj, int other)
     {
-        if(obj >= other) return;
-
         float2 otherPos = positions[other];
         float2 objPos = positions[obj];
 
         float2 diff = objPos - otherPos;
         float sqrDist = Hlsl.Dot(diff, diff);
-
-        
         float collisionDiameter = radius * 2.1f;
 
-        if (sqrDist > collisionDiameter * collisionDiameter) return;
-
-        float dist = Hlsl.Sqrt(sqrDist);
-        
-
-        if(dist == 0) 
+        if(sqrDist < collisionDiameter * collisionDiameter && sqrDist > epsilon) 
         {
-            positions[obj] += new float2(0.1f, -0.1f);
-            otherPos = positions[obj];
-            dist = 0.458f;
+            var dist = Hlsl.Sqrt(sqrDist);
+            var normDir = diff / dist;
+            var delta = collisionDiameter - dist;
+
+            Move(obj, normDir * delta * 0.5f);
+            Move(other, -normDir * delta * 0.5f);
         }
-
-        var normDir = diff / dist;
-        float delta = collisionDiameter - dist;
-
-        Move(obj, normDir * delta * 0.5f);
-        Move(other, -normDir * delta * 0.5f);
-
-        // float2 otherVelocity = otherPos - lastPositions[other];
-        // float2 objVelocity = objPos - lastPositions[obj];
-        // float otherSpeed = Hlsl.Length(otherVelocity);
-        // float objSpeed = Hlsl.Length(objVelocity);
-
-        //friction
-        // float friction = Hlsl.Abs(Hlsl.Min(Hlsl.Dot(otherVelocity/otherSpeed, objVelocity/objSpeed), 0));
-        // lastPositions[obj] += objVelocity * friction;
-        // lastPositions[other] += otherVelocity * friction;
     }
     
     void ApplyBoundary(int id)

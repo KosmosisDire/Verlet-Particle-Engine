@@ -7,15 +7,14 @@ namespace ProtoGUI;
 
 public static class ProtoSFMLExtentions
 {
-    public static Dictionary<Shape, bool> dragging = new Dictionary<Shape, bool>();
-    public static bool IsBeingDragged(this Shape shape, Mouse.Button button)
+    public static Dictionary<Shape, bool> dragging = new();
+    public static bool IsBeingDragged(this Shape shape, Mouse.Button button, Window? onWindow)
     {
         if (MouseGestures.ButtonDown(button))
         {
-            Vector2i mousePos = Mouse.GetPosition();
+            Vector2i mousePos = onWindow == null ? Mouse.GetPosition() : Mouse.GetPosition(onWindow);
             if (shape.GetGlobalBounds().Contains(mousePos.X, mousePos.Y))
             {
-                MouseGestures.overUI = true;
                 if (!dragging.ContainsKey(shape))
                 {
                     dragging.Add(shape, true);
@@ -29,7 +28,6 @@ public static class ProtoSFMLExtentions
 
         if (MouseGestures.ButtonUp(button))
         {
-            MouseGestures.overUI = false;
             if (dragging.ContainsKey(shape))
             {
                 dragging[shape] = false;
@@ -46,11 +44,12 @@ public static class ProtoSFMLExtentions
         }
     }
 
-    public static bool Clicked(this Shape shape, Mouse.Button button)
+    public static bool Clicked(this Shape shape, Mouse.Button button, Window? onWindow)
     {
         if (MouseGestures.ButtonDown(button))
         {
-            Vector2i mousePos = Mouse.GetPosition();
+            Vector2i mousePos = onWindow == null ? Mouse.GetPosition() : Mouse.GetPosition(onWindow);
+
             if (shape.GetGlobalBounds().Contains(mousePos.X, mousePos.Y))
             {
                 return true;

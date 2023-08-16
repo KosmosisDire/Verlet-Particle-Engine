@@ -17,10 +17,7 @@ public class Particle : IHasID, IDestroyable
 
     public Vector2f VelocityF
     {
-        get
-        {
-            return (Position.ToVector2f() - particleSystem.lastPositionsCPU[ID].ToVector2f());
-        }
+        get => Position.ToVector2f() - particleSystem.lastPositionsCPU[ID].ToVector2f();
 
         set => particleSystem.lastPositionsCPU[ID] = (Position.ToVector2f() - value).ToFloat2();
     }

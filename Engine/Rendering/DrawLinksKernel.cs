@@ -12,6 +12,7 @@ internal readonly partial struct DrawLinksKernel : IComputeShader
 
     public readonly int2 resolution;
     public readonly Rect cameraRect;
+    public readonly uint color;
 
     public void Execute()
     {
@@ -26,7 +27,7 @@ internal readonly partial struct DrawLinksKernel : IComputeShader
         if ((Hlsl.Any(position1 < 0) || Hlsl.Any(position1 > resolution)) && (Hlsl.Any(position2 < 0) || Hlsl.Any(position2 > resolution)))
             return;
 
-        DrawLine(position1, position2, 0xFFFFFFFF);
+        DrawLine(position1, position2, color);
     }
 
     public void SetColor(int2 coord, uint c)

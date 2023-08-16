@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using SFML;
 using SFML.Graphics;
 using SFML.System;
@@ -21,20 +22,26 @@ public class Panel
     public UITheme theme;
     readonly List<Control> controls = new();
 
+    public Window onWindow;
+
+    public Panel(Window window)
+    {
+        onWindow = window;
+    }
+
     public void AddControl(Control control)
     {
         controls.Add(control);
+        control.onWindow = onWindow;
     }
 
 
     public void UpdateRects()
     {
-        if(topBar.IsBeingDragged(Mouse.Button.Left))
+        if(topBar.IsBeingDragged(Mouse.Button.Left, onWindow))
         {
             position += MouseGestures.mouseDelta;
         }
-
-        
         
         background.Position = new Vector2f(position.X, position.Y + topBarHeight);
         background.Size = new Vector2f(size.X, size.Y - topBarHeight);
@@ -70,6 +77,31 @@ public class Panel
             control.Draw(window, this, height);
             height += control.height + control.verticalMargin * 2;
         }
+    }
+
+    public bool ContainsPoint(Vector2f point)
+    {
+        return point.X > position.X && point.X < position.X + size.X && point.Y > position.Y && point.Y < position.Y + size.Y;
+    }
+
+    public bool ContainsPoint(Vector2i point)
+    {
+        return point.X > position.X && point.X < position.X + size.X && point.Y > position.Y && point.Y < position.Y + size.Y;
+    }
+
+    public bool IsMouseCaptured()
+    {
+        if(topBar.IsBeingDragged(Mouse.Button.Left, onWindow)) return true;
+        
+        for (var i = 0; i < controls.Count; i++)
+        {
+            if(controls[i].IsMouseCaptured())
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public void Destroy()

@@ -33,25 +33,23 @@ public class ParticleSystem : IDisposable
 
     // private properties
     public GridAccess grid;
-    float gridTimeAvg = 0;
-    float integrationTimeAvg = 0;
-    float cellDivisor = 6f;
+    readonly float cellDivisor = 3f;
 
     // shader properties
-    ReadWriteBuffer<float2> positions;
-    ReadWriteBuffer<float2> lastPositions;
-    ReadWriteBuffer<float> travelDistances;
+    readonly ReadWriteBuffer<float2> positions;
+    readonly ReadWriteBuffer<float2> lastPositions;
+    readonly ReadWriteBuffer<float> travelDistances;
     ReadOnlyBuffer<int4> links;
     ReadWriteBuffer<float> linkStrain;
-    ReadOnlyBuffer<uint> colors;
-    ReadOnlyBuffer<int> active;
+    readonly ReadOnlyBuffer<uint> colors;
+    readonly ReadOnlyBuffer<int> active;
 
-    public float showThreshold = 1;
-    public Vector2f gravity = new Vector2f(0, 0);
-    public float antiPressurePower = 2;
+    public Vector2f gravity = new(0, 0);
+    public float antiPressurePower = 0.25f;
+    public int iterations = 5;
 
 
-    Stopwatch timer = new Stopwatch();
+   readonly Stopwatch timer = new();
 
     public ParticleSystem(int maxParticles, int width, int height, float radius)
     {
@@ -125,27 +123,47 @@ public class ParticleSystem : IDisposable
         return links;
     }
 
-
-    public void SolveParticles(float dt, bool debugTime = false)
+    public ReadOnlySpan<int> GetParticlesInGridAtPosition(Vector2f position)
     {
-        positions.CopyFrom(positionsCPU);
-        lastPositions.CopyFrom(lastPositionsCPU);
-        active.CopyFrom(particles.GetActiveArray());
+        
+        var gridIndex = grid.GetIndex(position);
+        var gridValueCount = grid.gridValueCountsArray[gridIndex];
+        var gridValueStart = grid.gridKeysArray[gridIndex];
 
+        return grid.gridValuesArray.AsSpan(gridValueStart, gridValueCount);
+    }
+
+    public ReadOnlySpan<int> GetParticlesInGridPosition(int index)
+    {
+        var gridValueCount = grid.gridValueCountsArray[index];
+        var gridValueStart = grid.gridKeysArray[index];
+
+        return grid.gridValuesArray.AsSpan(gridValueStart, gridValueCount);
+    }
+
+    public MovingAverage gridTime = new(100);
+    public MovingAverage collisionTime = new(100);
+    public MovingAverage linkTime = new(100);
+    public MovingAverage copyTime = new(100);
+    public MovingAverage totalUpdateTime = new(10);
+
+    public void SolveParticles(float dt)
+    {
+        lock(positionsCPU) positions.CopyFrom(positionsCPU);
+        lock(lastPositionsCPU) lastPositions.CopyFrom(lastPositionsCPU);
+        lock(active) active.CopyFrom(particles.GetActiveArray());
 
         timer.Restart();
 
         // --------------------------
-        grid.BuildGrid(positionsCPU, particles.GetActiveArray());
+        RegenerateGrid();
+        grid.BuildGridThreaded(positionsCPU, particles.GetActiveArray());
         // --------------------------
         
-        #region timing
         timer.Stop();
-        gridTimeAvg = timer.ElapsedMilliseconds * 0.1f + gridTimeAvg * 0.9f;
-        if(debugTime) Console.WriteLine($"Build Grid: {gridTimeAvg}ms");
+        gridTime.Add(timer.ElapsedMilliseconds);
+    
         timer.Restart();
-        #endregion
-
         // --------------------------
         GraphicsDevice.GetDefault().For(maxParticles, new IntegrationKernel
         (
@@ -163,9 +181,14 @@ public class ParticleSystem : IDisposable
             grid.cellSize.ToFloat2(),
             dt, 
             gravity.ToFloat2(),
-            antiPressurePower
+            antiPressurePower,
+            iterations
         ));
 
+        timer.Stop();
+        collisionTime.Add(timer.ElapsedMilliseconds);
+
+        timer.Restart();
         // --------------------------
         lock(linksCPU)
         {
@@ -179,127 +202,74 @@ public class ParticleSystem : IDisposable
                     linkStrain.Dispose();
                     linkStrain = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<float>((int)MathF.Ceiling(linksCPU.Count * 1.33f));
                 }
-
-                // if(linkData.Count < links.Length * 0.5f)
-                // {
-                //     links.Dispose();
-                //     links = GraphicsDevice.GetDefault().AllocateReadOnlyBuffer<int3>((int)MathF.Ceiling(linkData.Count * 1.33f));
-
-                //     linkStrain.Dispose();
-                //     linkStrain = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<float>((int)MathF.Ceiling(linkData.Count * 1.33f));
-                // }
-
-                links.CopyFrom(linksCPU.ToArray());
-                linkStrain.CopyFrom(linkStrainCPU.ToArray());
+                
+                lock(linksCPU) links.CopyFrom(linksCPU.ToArray());
+                lock(linkStrainCPU) linkStrain.CopyFrom(linkStrainCPU.ToArray());
 
                 GraphicsDevice.GetDefault().For(linksCPU.Count, new LinkKernel(links, positions, linkStrain, particleRadius, dt));
 
-                linkStrain.CopyTo(linkStrainCPU.GetArray());
+                lock(linkStrainCPU) linkStrain.CopyTo(linkStrainCPU.GetArray());
+                
 
-                for(int i = 0; i < linkStrainCPU.Count; i++)
+                lock(linkStrainCPU) lock(particleLinks) lock(linksCPU)
                 {
-                    if(linksCPU[i].W == 1 && linkStrainCPU[i] > linkStrength)
+                    for(var i = 0; i < linkStrainCPU.Count; i++)
                     {
-                        particleLinks[i].Destroy();
+                        if(linksCPU[i].W == 1 && linkStrainCPU[i] > linkStrength)
+                        {
+                            particleLinks[i].Destroy();
+                        }
                     }
                 }
             }
         }
 
+        timer.Stop();
+        linkTime.Add(timer.ElapsedMilliseconds);
         
-
+        timer.Restart();
         positions.CopyTo(positionsCPU);
         lastPositions.CopyTo(lastPositionsCPU);
-
-        #region timing
         timer.Stop();
-        integrationTimeAvg = timer.ElapsedMilliseconds * 0.1f + integrationTimeAvg * 0.9f;
-        if(debugTime) Console.WriteLine($"Integration: {integrationTimeAvg}ms");
-        #endregion
+        copyTime.Add(timer.ElapsedMilliseconds);
+
+        totalUpdateTime.Add(gridTime + collisionTime + linkTime + copyTime);
     }
 
-    public Particle? Raycast(Vector2f origin, Vector2f direction, float maxDistance, out List<Vector2f> gridIntersections, out List<Vector2f> samples)
+    public Particle? Raycast(Vector2f origin, Vector2f direction, float maxDistance, out List<Vector2f> gridIntersections)
     {
         direction = direction.Normalized();
         Vector2f end = origin + direction * maxDistance;
 
-        // Particle closestParticle = null;
-        // float closestDistance = float.MaxValue;
-
-        // for (int i = 0; i < particles.Count; i++)
-        // {
-        //     var particle = particles[i];
-        //     if(particle == null) continue;
-        //     var particlePos = particle.PositionF;
-        //     var originToParticle = particlePos - origin;
-        //     var originToEnd = end - origin;
-
-        //     if (originToParticle.LengthSquared() > originToEnd.LengthSquared()) continue;
-
-        //     var perpendicularToIdeal = originToParticle.PerpendicularClockwise().Normalized() * particleRadius;
-        //     var intersectRayWithPerpendicular = Math2D.LineSegementsIntersect(origin, end, particlePos + perpendicularToIdeal, particlePos - perpendicularToIdeal, out Vector2f rayIntersection);
-            
-        //     if(intersectRayWithPerpendicular)
-        //     {
-        //         var distance = (particlePos - origin).LengthSquared();
-        //         if(distance < closestDistance)
-        //         {
-        //             closestParticle = particle;
-        //             closestDistance = distance;
-        //         }
-        //     }
-        // }
-
-        // gridIntersections = null;
-        // samples = null;
-
-        // return closestParticle;
-        
-        var gridIndicies = grid.LineIntersectionIndicies(origin, end, out gridIntersections, out samples);
+        var gridIndicies = grid.LineIntersectionIndicies(origin, end, out gridIntersections);
 
         lock (grid.gridKeysArray) lock(grid.gridValueCountsArray) lock(grid.gridValuesArray)
         {
             for (int i = 0; i < gridIndicies.Count; i++)
             {
-                var index = gridIndicies[i];
-                var gridCellStart = grid.gridKeysArray[index];
-                var gridCellCount = grid.gridValueCountsArray[index];
-
                 Particle closestParticle = null;
                 float closestDistance = float.MaxValue;
 
-                for (int j = 0; j < gridCellCount; j++)
+                var index = gridIndicies[i];
+                var gridCellCount = grid.gridValueCountsArray[index];
+                var gridCellStart = grid.gridKeysArray[index];
+                var gridCellEnd = gridCellStart + gridCellCount;
+
+                for (int j = gridCellStart; j < gridCellEnd; j++)
                 {
-                    var particleIndex = grid.gridValuesArray[gridCellStart + j];
-                    var particle = particles[particleIndex];
+                    var particleIndex = grid.gridValuesArray[j];
+                    var particlePos = positionsCPU[particleIndex].ToVector2f();
 
-                    if(particle == null) continue;
-
-                    var particlePos = particle.PositionF;
-
-                    var originToParticle = particlePos - origin;
-                    var originToEnd = end - origin;
-
-                    if (originToParticle.LengthSquared() > originToEnd.LengthSquared()) continue;
-
-                    var perpendicularToIdeal = originToParticle.PerpendicularClockwise().Normalized() * particleRadius;
-
-                    var intersectRayWithPerpendicular = Math2D.LineSegementsIntersect(origin, end, particlePos + perpendicularToIdeal, particlePos - perpendicularToIdeal, out Vector2f rayIntersection);
-
-                    if(intersectRayWithPerpendicular)
+                    if(Math2D.LineSegmentIntersectsCircle(origin, end, particlePos, particleRadius))
                     {
-                        var distance = (particlePos - origin).LengthSquared();
+                        var distance = (particlePos - origin).SquareMagnitude();
                         if(distance < closestDistance)
                         {
-                            closestParticle = particle;
+                            closestParticle = particles[particleIndex];
                             closestDistance = distance;
                         }
-
-                        closestParticle = particle;
                     }
                 }
-
-                if (gridCellCount > 0) return closestParticle;
 
                 if(closestParticle != null) return closestParticle;
             }

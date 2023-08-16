@@ -6,9 +6,8 @@ namespace ProtoGUI;
 public static class MouseGestures 
 {
     public static Vector2f mouseDelta;
-    public static Vector2f mousePosition;
+    static Vector2f mousePosition;
     static Vector2f lastPos;
-    public static bool overUI = false;
 
     static bool leftButtonDown = false;
     static bool leftButtonUp = false;

@@ -2,7 +2,7 @@ using SFML.System;
 
 public class Math2D
 {
-    public static bool LineSegementsIntersect(Vector2f start, Vector2f end, Vector2f start2, Vector2f end2, 
+    public static bool LineSegmentsIntersect(Vector2f start, Vector2f end, Vector2f start2, Vector2f end2, 
                                                 out Vector2f intersection, bool considerCollinearOverlapAsIntersect = false)
     {
         intersection = new Vector2f();
@@ -53,50 +53,44 @@ public class Math2D
         return false;
     }
 
-    public static bool LineSegmentIntersectsRay(Vector2f start, Vector2f end, Vector2f rayStart, Vector2f rayDirection, out Vector2f intersection)
+    public static bool LineSegmentIntersectsCircle(Vector2f start, Vector2f end, Vector2f circleCenter, float circleRadius)
     {
-        intersection = new Vector2f();
+        var lineSegment = end - start;
+        var startToCircle = circleCenter - start;
+        var projection = startToCircle.Dot(lineSegment) / lineSegment.Dot(lineSegment);
 
-        var line1 = end - start;
-        var line2 = rayDirection;
-        var line1Crossline2 = line1.Cross(line2);
-        var startsCrossLine1 = (rayStart - start).Cross(line1);
-
-        // If r x s = 0 and (q - p) x r = 0, then the two lines are collinear.
-        if (line1Crossline2.IsZero() && startsCrossLine1.IsZero())
-        {
-            // 1. If either  0 <= (q - p) * r <= r * r or 0 <= (p - q) * s <= * s
-            // then the two lines are overlapping,
-            // 2. If neither 0 <= (q - p) * r = r * r nor 0 <= (p - q) * s <= s * s
-            // then the two lines are collinear but disjoint.
-            // No need to implement this expression, as it follows from the expression above.
-            return false;
-        }
-
-        // 3. If r x s = 0 and (q - p) x r != 0, then the two lines are parallel and non-intersecting.
-        if (line1Crossline2.IsZero() && !startsCrossLine1.IsZero())
+        if (projection > 1 + circleRadius / lineSegment.Magnitude() || projection < 0)
             return false;
 
-        // t = (q - p) x s / (r x s)
-        var time1 = (rayStart - start).Cross(line2)/line1Crossline2;
+        var closestPoint = start + projection * lineSegment;
+        var delta = circleCenter - closestPoint;
+        var squaredDistanceToClosestPoint = delta.Dot(delta);
 
-        // u = (q - p) x r / (r x s)
+        return squaredDistanceToClosestPoint <= circleRadius * circleRadius;
+    }
 
-        var time2 = (rayStart - start).Cross(line1)/line1Crossline2;
+    public static bool LineSegmentIntersectsBox(Vector2f start, Vector2f end, Vector2f boxCenter, float boxExtent)
+    {
+        var boxMin = boxCenter - new Vector2f(boxExtent, boxExtent);
+        var boxMax = boxCenter + new Vector2f(boxExtent, boxExtent);
 
-        // 4. If r x s != 0 and 0 <= t <= 1 and 0 <= u <= 1
-        // the two line segments meet at the point p + t r = q + u s.
-        if (!line1Crossline2.IsZero() && (0 <= time1 && time1 <= 1) && (0 <= time2 && time2 <= 1))
-        {
-            // We can calculate the intersection point using either t or u.
-            intersection = start + line1.Multiply(time1);
+        var topLeft = new Vector2f(boxMin.X, boxMax.Y);
+        var bottomRight = new Vector2f(boxMax.X, boxMin.Y);
 
-            // An intersection was found.
+        // Check if the line segment endpoints are inside the box
+        if (start.X >= boxMin.X && start.X <= boxMax.X && start.Y >= boxMin.Y && start.Y <= boxMax.Y)
             return true;
-        }
 
-        // 5. Otherwise, the two line segments are not parallel but do not intersect.
+        if (end.X >= boxMin.X && end.X <= boxMax.X && end.Y >= boxMin.Y && end.Y <= boxMax.Y)
+            return true;
+
+        // Perform the line segment to line segment intersection tests
+        if (LineSegmentsIntersect(start, end, topLeft, bottomRight, out _))
+            return true;
+
         return false;
     }
+
+
 
 }

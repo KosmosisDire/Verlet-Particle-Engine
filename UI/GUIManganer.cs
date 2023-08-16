@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using SFML.Graphics;
+using SFML.Window;
 
 namespace ProtoGUI;
 
@@ -60,6 +61,32 @@ public static class GUIManager
             panel.UpdateRects();
             panel.Draw(window);
         }
+    }
+
+    public static bool IsMouseOverUI()
+    {
+        foreach (Panel panel in panels)
+        {
+            if (panel.ContainsPoint(Mouse.GetPosition(window)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static bool IsMouseCapturedByUI(bool includeHovering = true)
+    {
+        foreach (Panel panel in panels)
+        {
+            if ((panel.ContainsPoint(Mouse.GetPosition(window)) && includeHovering) || panel.IsMouseCaptured())
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
