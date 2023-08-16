@@ -1,5 +1,4 @@
 
-
 public struct Rect
 {
     public float2 size;

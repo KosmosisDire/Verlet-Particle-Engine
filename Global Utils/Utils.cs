@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using ComputeSharp;
 using SFML.Graphics;
 
 public static class Utils

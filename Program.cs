@@ -5,10 +5,13 @@ using SFML.Window;
 using Engine;
 using Engine.Rendering;
 using ParticlePhysics;
-using System.Collections.Concurrent;
 
 public static class Application
 {
+    public static Loop update = EngineLoop.CreateLoop("Update", 60, false);
+    public static Loop physicsUpdate = EngineLoop.CreateLoop("Physics", 60, false);
+    public static Loop draw = EngineLoop.CreateLoop("Draw", 30, false);
+
     public static Canvas canvas;
     public static ParticleSystem particleSystem;
     public static Camera camera;
@@ -214,9 +217,7 @@ public static class Application
         panel.AddControl(new Label("Right click to place a bunch of boxes made of particles.", 15));
     }
 
-    public static Loop update = EngineLoop.CreateLoop("Update", 60, false);
-    public static Loop physicsUpdate = EngineLoop.CreateLoop("Physics", 60, false);
-    public static Loop draw = EngineLoop.CreateLoop("Draw", 30, false);
+
     
     static void Main(string[] args)
     {

@@ -1,6 +1,3 @@
-using System.Collections.Generic;
-using System.Runtime.CompilerServices;
-using SFML;
 using SFML.Graphics;
 using SFML.System;
 using SFML.Window;

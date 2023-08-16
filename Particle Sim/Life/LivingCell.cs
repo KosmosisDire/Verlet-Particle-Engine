@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using SFML.Graphics;
 using SFML.System;
 using ParticlePhysics;

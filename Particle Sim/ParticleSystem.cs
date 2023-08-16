@@ -1,7 +1,6 @@
 using ComputeSharp;
 using SFML.Graphics;
 using SFML.System;
-using System.Collections.Generic;
 using ParticlePhysics.Internal;
 using System.Diagnostics;
 

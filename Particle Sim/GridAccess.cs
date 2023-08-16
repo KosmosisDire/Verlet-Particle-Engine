@@ -3,7 +3,6 @@ using ComputeSharp;
 using SFML.System;
 using Engine.Rendering;
 using SFML.Graphics;
-using System.Diagnostics;
 
 namespace ParticlePhysics.Internal;
 

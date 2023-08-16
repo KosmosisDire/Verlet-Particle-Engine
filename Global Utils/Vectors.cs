@@ -1,4 +1,3 @@
-using ComputeSharp;
 using SFML.System;
 
 public static class Vector2fExtensions
