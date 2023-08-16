@@ -146,52 +146,6 @@ public class Canvas
         bitmapDataInt[(int)pos.X + (int)pos.Y * width] = Utils.RGBAToInt(color.R, color.G, color.B, color.A);
     }
 
-
-    // public void DrawLineCPU(Vector2f start, Vector2f end, Color color, int dottedInterval = 0)
-    // {
-    //     //adjust for camera bounds
-    //     start = viewCamera.WorldToScreen(start);
-    //     end = viewCamera.WorldToScreen(end);
-
-    //     var x1 = (int)start.X;
-    //     var y1 = (int)start.Y;
-    //     var x2 = (int)end.X;
-    //     var y2 = (int)end.Y;
-
-    //     int dx = Math.Abs(x2 - x1);
-    //     int dy = Math.Abs(y2 - y1);
-    //     int sx = x1 < x2 ? 1 : -1;
-    //     int sy = y1 < y2 ? 1 : -1;
-    //     int err = dx - dy;
-
-    //     int flatIndex = 0;
-    //     while(true) 
-    //     {
-    //         // Plot the current point (x1, y1)
-    //         if (dottedInterval == 0 || (flatIndex / dottedInterval) % 2 == 0)
-    //         {
-    //             DrawPixelCPU(new Vector2f(x1, y1), color);
-    //         }
-
-    //         flatIndex++;
-
-    //         if (x1 == x2 && y1 == y2) {
-    //             break;
-    //         }
-
-    //         int e2 = 2 * err;
-    //         if (e2 > -dy) {
-    //             err -= dy;
-    //             x1 += sx;
-    //         }
-
-    //         if (e2 < dx) {
-    //             err += dx;
-    //             y1 += sy;
-    //         }
-    //     }
-    // }
-
     public void DrawLineCPU(Vector2f start, Vector2f end, Color color, int dottedInterval = 0)
     {
         var startScreen = viewCamera.WorldToScreen(start);
@@ -237,9 +191,6 @@ public class Canvas
             }
         }
     }
-
-    
-
 
     public void DrawCircleCPU(Vector2f pos, float radius, Color color)
     {

@@ -162,42 +162,6 @@ public struct GridAccess : IDisposable
         }
 
         canvas.DrawLines(starts, ends, color);
-
-        // var cellSize = this.cellSize;
-        // var extents = this.extents;
-
-        // var rangePartitioner = Partitioner.Create(0, (int)MathF.Max(cellCount.X, cellCount.Y), (int)(MathF.Max(cellCount.X, cellCount.Y) / Environment.ProcessorCount));
-
-        // var cellCountLocal = cellCount;
-
-        // Parallel.ForEach(rangePartitioner, (range, loopState) =>
-        // {
-        //     for(var i = range.Item1; i < range.Item2; i++)
-        //     {
-        //         if (i <= cellCountLocal.X)
-        //         {
-        //             var edgeStart = new Vector2f(i * cellSize.X, 0);
-        //             var edgeEnd = new Vector2f(i * cellSize.X, extents.Y);
-                    
-        //             // skip if line is off camera
-        //             var cameraBounds = canvas.viewCamera.RectBoundsWorld;
-        //             if(edgeStart.X < cameraBounds.topLeft.X || edgeStart.X > cameraBounds.bottomRight.X) continue;
-
-        //             canvas.DrawLineCPU(edgeStart, edgeEnd, color, 5);
-        //         }
-
-        //         if (i <= cellCountLocal.Y)
-        //         {
-        //             var edgeStart = new Vector2f(0, i * cellSize.Y);
-        //             var edgeEnd = new Vector2f(extents.X, i * cellSize.Y);
-
-        //             var cameraBounds = canvas.viewCamera.RectBoundsWorld;
-        //             if (edgeStart.Y < cameraBounds.topLeft.Y || edgeStart.Y > cameraBounds.bottomRight.Y) continue;
-
-        //             canvas.DrawLineCPU(edgeStart, edgeEnd, color, 5);
-        //         }
-        //     }
-        // });
     }
 
     public void BuildGrid(float2[] positionsArray, int[] activeArray)
@@ -259,169 +223,78 @@ public struct GridAccess : IDisposable
             gridKeys.CopyFrom(gridKeysArray);
             gridValueCountsArray = gridValueCountsLocal;
 
-            }
         }
+    }
 
-        // runs the build grid method using Parallel.ForEach and a partitioner
-        // locks the gridValues, gridValueCounts, gridKeys, and itemIndiciesTemp arrays
-        public void BuildGridThreaded(float2[] positionsArray, int[] activeArray)
+    // runs the build grid method using Parallel.ForEach and a partitioner
+    // locks the gridValues, gridValueCounts, gridKeys, and itemIndiciesTemp arrays
+    public void BuildGridThreaded(float2[] positionsArray, int[] activeArray)
+    {
+        lock(gridValues) lock(gridValueCounts) lock(gridKeys) lock (gridKeysArray) lock(gridValueCountsArray)
         {
-            lock(gridValues) lock(gridValueCounts) lock(gridKeys) lock (gridKeysArray) lock(gridValueCountsArray)
+            var gridValueCountsLocal = new int[cellCountLinear];
+
+            GridAccess grid = this;
+
+            var partitioner = Partitioner.Create(0, positionsArray.Length, positionsArray.Length / Environment.ProcessorCount);
+
+            // store the item indicies in a temp array and
+            // count up the number of values in each cell
+            Parallel.ForEach(partitioner, range =>
             {
-                var gridValueCountsLocal = new int[cellCountLinear];
-
-                GridAccess grid = this;
-
-                var partitioner = Partitioner.Create(0, positionsArray.Length, positionsArray.Length / Environment.ProcessorCount);
-
-                // store the item indicies in a temp array and
-                // count up the number of values in each cell
-                Parallel.ForEach(partitioner, range =>
+                for (var i = range.Item1; i < range.Item2; i++)
                 {
-                    for (var i = range.Item1; i < range.Item2; i++)
-                    {
-                        if (activeArray[i] == 0) continue;
+                    if (activeArray[i] == 0) continue;
 
-                        var index = grid.GetIndex(positionsArray[i].ToVector2f());
-                        grid.itemIndiciesTemp[i] = index;
-                        Interlocked.Increment(ref gridValueCountsLocal[index]);
-                    }
-                });
-
-                // the grid keys are the starting indicies for each cell
-                // these are calculated by adding the previous cell's value count
-                // set the value counts to 0 because we will use it as a counter in the next pass
-
-                gridKeysArray[0] = 0;
-
-                for (var i = 0; i < grid.gridKeysArray.Length - 1; i++)
-                {
-                    grid.gridKeysArray[i + 1] = grid.gridKeysArray[i] + gridValueCountsLocal[i];
-                    gridValueCountsLocal[i] = 0;
+                    var index = grid.GetIndex(positionsArray[i].ToVector2f());
+                    grid.itemIndiciesTemp[i] = index;
+                    Interlocked.Increment(ref gridValueCountsLocal[index]);
                 }
+            });
 
-                gridValueCountsLocal[gridValueCountsLocal.Length - 1] = 0;
+            // the grid keys are the starting indicies for each cell
+            // these are calculated by adding the previous cell's value count
+            // set the value counts to 0 because we will use it as a counter in the next pass
 
-                // store the particle indicies in the grid values array
-                // the grid values are the actual indicies that are passed into the particle data arrays to get data about that particle
-                Parallel.ForEach(partitioner, range =>
-                {
-                    for (var i = range.Item1; i < range.Item2; i++)
-                    {
-                        if (activeArray[i] == 0) continue;
+            gridKeysArray[0] = 0;
 
-                        var index = grid.itemIndiciesTemp[i];
-
-                        var valueIndex = grid.gridKeysArray[index] + gridValueCountsLocal[index];
-
-                        if (valueIndex >= grid.gridValuesArray.Length)
-                        {
-                            throw new Exception($"ValueIndex ({valueIndex}) must be less than gridValues.Length ({grid.gridValuesArray.Length})");
-                        }
-
-                        grid.gridValuesArray[valueIndex] = i;
-                        Interlocked.Increment(ref gridValueCountsLocal[index]);
-                    }
-                });
-
-                gridValues.CopyFrom(gridValuesArray);
-                gridValueCounts.CopyFrom(gridValueCountsLocal);
-                gridKeys.CopyFrom(gridKeysArray);
-                gridValueCountsArray = gridValueCountsLocal;
-                
+            for (var i = 0; i < grid.gridKeysArray.Length - 1; i++)
+            {
+                grid.gridKeysArray[i + 1] = grid.gridKeysArray[i] + gridValueCountsLocal[i];
+                gridValueCountsLocal[i] = 0;
             }
-        }
-    
-    // public void BuildGrid(float2[] positionsArray, int[] activeArray)
-    // {
-    //     lock(gridValues) lock(gridValueCounts) lock(gridKeys) lock (gridKeysArray) lock(gridValueCountsArray)
-    //     {
-    //         GridAccess grid = this;
-    //         var gridValueCountsLocal = new int[cellCountLinear];
 
-    //         for(int i = 0; i < positionsArray.Length; i++)
-    //         {
-    //             if(activeArray[i] == 0) continue;
-    //             var x = (int)Math.Clamp(positionsArray[i].X / grid.cellSize.X, 0, grid.cellCount.X-1);
-    //             var y = (int)Math.Clamp(positionsArray[i].Y / grid.cellSize.Y, 0, grid.cellCount.Y-1);
-    //             int index = x + y * grid.cellCount.X;
-    //             grid.itemIndiciesTemp[i] = index;
-    //             gridValueCountsLocal[index]++;
-    //         }
+            gridValueCountsLocal[gridValueCountsLocal.Length - 1] = 0;
 
-    //         for (int i = 0; i < gridKeysArray.Length-1; i++)
-    //         {
-    //             gridKeysArray[i+1] = gridKeysArray[i] + Math.Max(gridValueCountsLocal[i] - 1, 0);
-    //             gridValueCountsLocal[i] = 0;
-    //         }
+            // store the particle indicies in the grid values array
+            // the grid values are the actual indicies that are passed into the particle data arrays to get data about that particle
+            Parallel.ForEach(partitioner, range =>
+            {
+                for (var i = range.Item1; i < range.Item2; i++)
+                {
+                    if (activeArray[i] == 0) continue;
 
-    //         for (int i = 0; i < positionsArray.Length; i++)
-    //         {
-    //             if (activeArray[i] == 0) continue;
+                    var index = grid.itemIndiciesTemp[i];
+
+                    var valueIndex = grid.gridKeysArray[index] + gridValueCountsLocal[index];
+
+                    if (valueIndex >= grid.gridValuesArray.Length)
+                    {
+                        throw new Exception($"ValueIndex ({valueIndex}) must be less than gridValues.Length ({grid.gridValuesArray.Length})");
+                    }
+
+                    grid.gridValuesArray[valueIndex] = i;
+                    Interlocked.Increment(ref gridValueCountsLocal[index]);
+                }
+            });
+
+            gridValues.CopyFrom(gridValuesArray);
+            gridValueCounts.CopyFrom(gridValueCountsLocal);
+            gridKeys.CopyFrom(gridKeysArray);
+            gridValueCountsArray = gridValueCountsLocal;
             
-    //             int index = grid.itemIndiciesTemp[i];
-    //             int valueIndex = Math.Clamp(grid.gridKeysArray[index] + gridValueCountsLocal[index], 0, grid.gridValues.Length - 1);
-    //             grid.gridValuesArray[valueIndex] = i;
-    //             gridValueCountsLocal[index]++;
-    //         }
-
-    //         gridValues.CopyFrom(gridValuesArray);
-    //         gridValueCounts.CopyFrom(gridValueCountsLocal);
-    //         gridKeys.CopyFrom(gridKeysArray);
-    //         this.gridValueCountsArray = gridValueCountsLocal;
-    //     }
-        
-
-    //     // lock(gridValues) lock(gridValueCounts) lock(gridKeys) lock (gridKeysArray) lock(gridValueCountsArray)
-    //     // {
-    //     //     var gridValueCountsLocal = new int[cellCountLinear];
-
-    //     //     GridAccess grid = this;
-
-    //     //     var rangePartitioner = Partitioner.Create(0, positionsArray.Length);
-
-    //     //     Parallel.ForEach(rangePartitioner, (range, loopState) =>
-    //     //     {
-    //     //         for(int i = range.Item1; i < range.Item2; i++)
-    //     //         {
-    //     //             if(activeArray[i] == 0) continue;
-    //     //             var x = (int)Math.Clamp(positionsArray[i].X / grid.cellSize.X, 0, grid.cellCount.X-1);
-    //     //             var y = (int)Math.Clamp(positionsArray[i].Y / grid.cellSize.Y, 0, grid.cellCount.Y-1);
-    //     //             int index = x + y * grid.cellCount.X;
-
-    //     //             grid.itemIndiciesTemp[i] = index;
-
-    //     //             Interlocked.Increment(ref gridValueCountsLocal[index]);
-    //     //         }
-    //     //     });
-
-    //     //     for (int i = 0; i < gridKeysArray.Length-1; i++)
-    //     //     {
-    //     //         gridKeysArray[i+1] = gridKeysArray[i] + Math.Max(gridValueCountsLocal[i] - 1, 0);
-    //     //         gridValueCountsLocal[i] = 0;
-    //     //     }
-
-    //     //     Parallel.ForEach(rangePartitioner, (range, loopState) =>
-    //     //     {
-    //     //         for (int i = range.Item1; i < range.Item2; i++)
-    //     //         {
-    //     //             if (activeArray[i] == 0) continue;
-                    
-    //     //             int index = grid.itemIndiciesTemp[i];
-
-    //     //             int valueIndex = Math.Clamp(grid.gridKeysArray[index] + gridValueCountsLocal[index], 0, grid.gridValues.Length - 1);
-    //     //             grid.gridValuesArray[valueIndex] = i;
-    //     //             Interlocked.Increment(ref gridValueCountsLocal[index]);
-    //     //         }
-    //     //     });
-
-    //     //     gridValues.CopyFrom(gridValuesArray);
-    //     //     gridValueCounts.CopyFrom(gridValueCountsLocal);
-    //     //     gridKeys.CopyFrom(gridKeysArray);
-
-    //     //     this.gridValueCountsArray = gridValueCountsLocal;
-    //     // }
-    // }
+        }
+    }
 
     public void Dispose()
     {
