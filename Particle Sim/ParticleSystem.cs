@@ -3,9 +3,6 @@ using SFML.Graphics;
 using SFML.System;
 using ParticlePhysics.Internal;
 using System.Diagnostics;
-using System.Collections;
-using TerraFX.Interop.Windows;
-using System.Collections.Concurrent;
 
 namespace ParticlePhysics;
 
