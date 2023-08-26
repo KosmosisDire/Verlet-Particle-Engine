@@ -7,7 +7,7 @@
             "type": "process",
             "args": [
                 "build",
-                "${workspaceFolder}/Particle Life.csproj",
+                "${workspaceFolder}/Verlet Particle Engine.csproj",
                 "/property:GenerateFullPaths=true",
                 "/consoleloggerparameters:NoSummary"
             ],
@@ -19,7 +19,7 @@
             "type": "process",
             "args": [
                 "publish",
-                "${workspaceFolder}/Particle Life.csproj",
+                "${workspaceFolder}/Verlet Particle Engine.csproj",
                 "/property:GenerateFullPaths=true",
                 "/consoleloggerparameters:NoSummary"
             ],
@@ -33,7 +33,7 @@
                 "watch",
                 "run",
                 "--project",
-                "${workspaceFolder}/Particle Life.csproj"
+                "${workspaceFolder}/Verlet Particle Engine.csproj"
             ],
             "problemMatcher": "$msCompile"
         }
