@@ -1,10 +1,10 @@
-﻿using ProtoGUI;
-using SFML.Graphics;
+﻿using SFML.Graphics;
 using SFML.System;
 using SFML.Window;
-using Engine;
-using Engine.Rendering;
 using ParticlePhysics;
+using ProtoEngine;
+using ProtoEngine.Rendering;
+using ProtoEngine.UI;
 
 public static class Application
 {
@@ -47,11 +47,11 @@ public static class Application
 
             for(int i = 0; i < 50; i++)
             {
-                var mousePositionNext = screen.ScreenToWorld(screen.mousePosition + new Vector2f(random.NextSingle() * 10 - 5, random.NextSingle() * 10 - 5));
+                var mousePositionNext = screen.ScreenToWorld(screen.mousePosition + new Vector2(random.NextSingle() * 10 - 5, random.NextSingle() * 10 - 5));
                 var position = mousePositionNext;
                 if(lastParticle != null)
                 {
-                    position = lastParticle.PositionF + (mousePositionNext - lastParticle.PositionF).Normalized() * particleSystem.particleRadius * 2;
+                    position = lastParticle.PositionF + (mousePositionNext - lastParticle.PositionF).Normalized * particleSystem.particleRadius * 2;
                 }
 
                 var p = particleSystem.AddParticle(position, c);
@@ -78,12 +78,12 @@ public static class Application
             for(int i = 0; i < MathF.Pow(brushSize / spacing, 2); i++)
             {
                 // place particles on a grid centered on the mouse not randomly
-                Vector2f position = screen.ScreenToWorld(screen.mousePosition) - new Vector2f(brushSize / 2, brushSize / 2) + new Vector2f((i % (brushSize / spacing)) * spacing, MathF.Floor(i / (brushSize / spacing)) * spacing);
+                Vector2 position = screen.ScreenToWorld(screen.mousePosition) - new Vector2(brushSize / 2, brushSize / 2) + new Vector2((i % (brushSize / spacing)) * spacing, MathF.Floor(i / (brushSize / spacing)) * spacing);
                 var topLeft = particleSystem.AddParticle(position, c);
-                var topRight = particleSystem.AddParticle(topLeft.PositionF + new Vector2f(particleSystem.particleRadius * 2, 0), c);
-                var bottomLeft = particleSystem.AddParticle(topLeft.PositionF + new Vector2f(0, particleSystem.particleRadius * 2), c);
+                var topRight = particleSystem.AddParticle(topLeft.PositionF + new Vector2(particleSystem.particleRadius * 2, 0), c);
+                var bottomLeft = particleSystem.AddParticle(topLeft.PositionF + new Vector2(0, particleSystem.particleRadius * 2), c);
                 
-                var diagonal = new Vector2f(particleSystem.particleRadius * 2, particleSystem.particleRadius * 2);
+                var diagonal = new Vector2(particleSystem.particleRadius * 2, particleSystem.particleRadius * 2);
                 var bottomRight = particleSystem.AddParticle(topLeft.PositionF + diagonal, c);
                 
                 topLeft.Link(topRight, particleSystem.particleRadius * 2);
@@ -91,7 +91,7 @@ public static class Application
                 bottomRight.Link(bottomLeft, particleSystem.particleRadius * 2);
                 bottomLeft.Link(topLeft, particleSystem.particleRadius * 2);
 
-                var diagonalLength = diagonal.Magnitude();
+                var diagonalLength = diagonal.Magnitude;
                 topLeft.Link(bottomRight, diagonalLength);
                 topRight.Link(bottomLeft, diagonalLength); 
             }
@@ -137,10 +137,10 @@ public static class Application
 
         screen.Clear();
 
-        screen.DrawParticleSystemBounds(particleSystem, new Color(52, 170, 134));
+        particleSystem.DrawBounds(screen, new Color(52, 170, 134));
         screen.ApplyCPUDraw();
 
-        screen.DrawParticleSystem(particleSystem);
+        particleSystem.Draw(screen);
         screen.ApplyGPUDraw();
     }
 
@@ -154,8 +154,8 @@ public static class Application
         camera.UpdateZooming();
         
 
-        // Vector2f centerOfArea = (Vector2f)(particleSystem.grid.extents / 2);
-        // Vector2f mousePosition = camera.ScreenToWorld((Vector2f)screen.GetMousePosition());
+        // Vector2 centerOfArea = (Vector2)(particleSystem.grid.extents / 2);
+        // Vector2 mousePosition = camera.ScreenToWorld((Vector2)screen.GetMousePosition());
         
         // // partitioner parallel raycasts
         // var partitioner = Partitioner.Create(0, 360, 360 / Environment.ProcessorCount);
@@ -165,7 +165,7 @@ public static class Application
         //     for (float i = range.Item1; i < range.Item2; i+=0.5f)
         //     {
         //         var angle = i * Math.PI / 180;
-        //         var direction = new Vector2f((float)Math.Cos(angle), (float)Math.Sin(angle));
+        //         var direction = new Vector2((float)Math.Cos(angle), (float)Math.Sin(angle));
         //         var distance = (mousePosition - centerOfArea).Magnitude();
         //         Particle hitParticle = particleSystem.Raycast(centerOfArea, direction, distance, out _);
                 
@@ -182,7 +182,7 @@ public static class Application
             throw new Exception("Screen, particleSystem or camera is null");
         }
         
-        Panel infoPanel = new Panel(new Vector2f(10, 10), 200, screen);
+        Panel infoPanel = new Panel(new Vector2(10, 10), 200, screen);
 
         new UpdatableControl<string>("Update FPS: ",        infoPanel, () => EngineLoop.GetLoop("Update")?.measuredFPS.ToString("N0") ?? "0");
         new UpdatableControl<string>("Physics FPS: ",       infoPanel, () => EngineLoop.GetLoop("Physics")?.measuredFPS.ToString("N0") ?? "0");
@@ -200,12 +200,12 @@ public static class Application
         new UpdatableControl<string>("Particles: ",         infoPanel, () => particleSystem.ParticleCount.ToString("N0"));
         new UpdatableControl<string>("Links: ",             infoPanel, () => particleSystem.LinkCount.ToString("N0"));
 
-        Panel controlPanel = new Panel(new Vector2f(10, 300), 600, screen);
+        Panel controlPanel = new Panel(new Vector2(10, 300), 600, screen);
 
         // var radius = new Slider("Radius", controlPanel, (value) => particleSystem.SetRadius(value), 50f, 10,100, 1f);
         new Slider("Anti Pressure Power", controlPanel, (value) => particleSystem.antiPressurePower = value, 0.1f, 0.01f, 2, 0.01f);
         new Slider("Iterations", controlPanel, (value) => particleSystem.iterations = (int)value, 12, 1, 20, 1);
-        var gravity = new Vector2Slider("Gravity", controlPanel, (value) => particleSystem.gravity = value, new Vector2f(0, 0), new Vector2f(-100, -100), new Vector2f(100, 100), 1)
+        var gravity = new Vector2Slider("Gravity", controlPanel, (value) => particleSystem.gravity = value, new Vector2(0, 0), new Vector2(-100, -100), new Vector2(100, 100), 1)
         {
             LineHeight = 150,
             margin = new(0, 10)
@@ -226,8 +226,8 @@ public static class Application
         draw.RunActionSync(() => 
         {
             screen = new Screen("Particle Sim", draw, 1920, 1080, true);
-            screen.SetFillColor(new uint4(28, 30, 38, 255));
-            camera = new Camera(new Vector2f (25000, 25000), 60, screen);
+            screen.SetFillColor(new Color(28, 30, 38, 255));
+            camera = new Camera(new Vector2 (25000, 25000), 60, screen);
         });
 
         update.RunActionSync(() => 

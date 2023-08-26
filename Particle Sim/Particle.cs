@@ -1,3 +1,4 @@
+using ProtoEngine;
 using SFML.Graphics;
 using SFML.System;
 
@@ -13,25 +14,25 @@ public class Particle : IHasID, IDestroyable
 
     public float2 Position { get => particleSystem.positionsCPU[ID]; set => particleSystem.positionsCPU[ID] = value; }
 
-    public Vector2f PositionF { get => particleSystem.positionsCPU[ID].ToVector2f(); set => particleSystem.positionsCPU[ID] = value.ToFloat2(); }
+    public Vector2 PositionF { get => particleSystem.positionsCPU[ID]; set => particleSystem.positionsCPU[ID] = value; }
 
-    public Vector2f VelocityF
+    public Vector2 VelocityF
     {
-        get => Position.ToVector2f() - particleSystem.lastPositionsCPU[ID].ToVector2f();
+        get => Position - particleSystem.lastPositionsCPU[ID];
 
-        set => particleSystem.lastPositionsCPU[ID] = (PositionF - value).ToFloat2();
+        set => particleSystem.lastPositionsCPU[ID] = PositionF - value;
     }
 
     public readonly bool initialized = false;
 
-    public void Accelerate(Vector2f acceleration)
+    public void Accelerate(Vector2 acceleration)
     {
-        particleSystem.lastPositionsCPU[ID] = (particleSystem.lastPositionsCPU[ID].ToVector2f() - acceleration).ToFloat2();
+        particleSystem.lastPositionsCPU[ID] = (Vector2)particleSystem.lastPositionsCPU[ID] - acceleration;
     }
 
     public void SetColor(uint4 color)
     {
-        particleSystem.colorsCPU[ID] = Utils.RGBAToInt(color);
+        particleSystem.colorsCPU[ID] = new Color((byte)color.X, (byte)color.Y, (byte)color.Z, (byte)color.W).ToInteger();
     }
 
     public void Link(Particle other, float length)
@@ -60,7 +61,7 @@ public class Particle : IHasID, IDestroyable
         return list;
     }
 
-    public Particle(Vector2f position, Color color, ParticleSystem particleSystem)
+    public Particle(Vector2 position, Color color, ParticleSystem particleSystem)
     {
         this.particleSystem = particleSystem;
         particleSystem.AddParticle(this, position, color);

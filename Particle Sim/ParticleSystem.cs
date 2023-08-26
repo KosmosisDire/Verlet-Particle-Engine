@@ -3,6 +3,9 @@ using SFML.Graphics;
 using SFML.System;
 using ParticlePhysics.Internal;
 using System.Diagnostics;
+using ProtoEngine;
+using ProtoEngine.Utils;
+using ProtoEngine.Rendering;
 
 namespace ParticlePhysics;
 
@@ -20,7 +23,7 @@ public class ParticleSystem : IDisposable
     public int LinkCount => linkCount;
 
     public float particleRadius { get; private set; }
-    public Vector2i boundsSize { get; private set; }
+    public Vector2 boundsSize { get; private set; }
 
     //public properties
     public PersistentListDestroyable<Particle> particles;
@@ -54,7 +57,7 @@ public class ParticleSystem : IDisposable
 
 
 
-    public Vector2f gravity = new(0, 0);
+    public Vector2 gravity = new(0, 0);
     public float antiPressurePower = 0.25f;
     public int iterations = 5;
 
@@ -69,7 +72,7 @@ public class ParticleSystem : IDisposable
     {
         this.maxParticles = maxParticles;
         this.maxLinks = maxLinks;
-        this.boundsSize = new Vector2i(width, height);
+        this.boundsSize = new Vector2(width, height);
         this.particleRadius = radius;
 
         var col = Enumerable.Repeat(0xFFFFFFFF, maxParticles).ToArray();
@@ -95,24 +98,24 @@ public class ParticleSystem : IDisposable
         linkKeysArray = Enumerable.Repeat(-1, maxParticles*maxLinksPerParticle).ToArray();
 
 
-        Vector2i cellCount = new Vector2i((int)((width/(radius*2))/cellDivisor), (int)((height/(radius*2))/cellDivisor));
-        grid = new GridAccess(cellCount, new Vector2i(width, height), maxParticles);
+        Vector2 cellCount = new Vector2((int)((width/(radius*2))/cellDivisor), (int)((height/(radius*2))/cellDivisor));
+        grid = new GridAccess(cellCount, new Vector2(width, height), maxParticles);
     }
 
-    public Particle AddParticle(Vector2f position, Color? color = null)
+    public Particle AddParticle(Vector2 position, Color? color = null)
     {
         var c = color ?? Color.White;
         var p = new Particle(position, c, this);
         return p;
     }
 
-    public Particle AddParticle(Particle particle, Vector2f position, Color color)
+    public Particle AddParticle(Particle particle, Vector2 position, Color color)
     {
         if(particle.initialized) return particle;
 
         lock(particles) particles.Add(particle);
-        lock(positionsCPU) positionsCPU[particle.ID] = position.ToFloat2();
-        lock(lastPositionsCPU) lastPositionsCPU[particle.ID] = position.ToFloat2();
+        lock(positionsCPU) positionsCPU[particle.ID] = position;
+        lock(lastPositionsCPU) lastPositionsCPU[particle.ID] = position;
         lock(colorsCPU) colorsCPU[particle.ID] = color.ToUInt32();
         
         particleCount++;
@@ -166,7 +169,7 @@ public class ParticleSystem : IDisposable
 
     public void RegenerateGrid()
     {
-        Vector2i cellCount = new Vector2i((int)((boundsSize.X/(particleRadius*2))/cellDivisor), (int)((boundsSize.Y/(particleRadius*2))/cellDivisor));
+        Vector2 cellCount = new Vector2((int)((boundsSize.X/(particleRadius*2))/cellDivisor), (int)((boundsSize.Y/(particleRadius*2))/cellDivisor));
         grid.SetCellCount(cellCount);
     }
 
@@ -196,7 +199,7 @@ public class ParticleSystem : IDisposable
         return active;
     }
 
-    public ReadOnlySpan<int> GetParticlesInGridAtPosition(Vector2f position)
+    public ReadOnlySpan<int> GetParticlesInGridAtPosition(Vector2 position)
     {
         var gridIndex = grid.GetIndex(position);
         var gridValueCount = grid.gridValueCountsArray[gridIndex];
@@ -278,12 +281,12 @@ public class ParticleSystem : IDisposable
             maxLinksPerParticle,
             linkStrain,
             particleRadius, 
-            boundsSize.ToInt2(), 
-            grid.cellCount.ToInt2(),
+            boundsSize, 
+            grid.cellCount,
             grid.cellCountLinear,
-            grid.cellSize.ToFloat2(),
+            grid.cellSize,
             dt, 
-            gravity.ToFloat2(),
+            gravity,
             antiPressurePower,
             iterations
         ));
@@ -302,10 +305,10 @@ public class ParticleSystem : IDisposable
         totalSolveTime.Add(collisionTime + copyTime);
     }
 
-    public Particle? Raycast(Vector2f origin, Vector2f direction, float maxDistance, out List<Vector2f> gridIntersections)
+    public Particle? Raycast(Vector2 origin, Vector2 direction, float maxDistance, out List<Vector2> gridIntersections)
     {
-        direction = direction.Normalized();
-        Vector2f end = origin + direction * maxDistance;
+        direction = direction.Normalized;
+        Vector2 end = origin + direction * maxDistance;
 
         var gridIndicies = grid.LineIntersectionIndicies(origin, end, out gridIntersections);
 
@@ -324,11 +327,11 @@ public class ParticleSystem : IDisposable
                 for (int j = gridCellStart; j < gridCellEnd; j++)
                 {
                     var particleIndex = grid.gridValuesArray[j];
-                    var particlePos = positionsCPU[particleIndex].ToVector2f();
+                    var particlePos = positionsCPU[particleIndex];
 
                     if(Math2D.LineSegmentIntersectsCircle(origin, end, particlePos, particleRadius))
                     {
-                        var distance = (particlePos - origin).SquareMagnitude();
+                        var distance = ((Vector2)particlePos - origin).SqrMagnitude;
                         if(distance < closestDistance)
                         {
                             closestParticle = particles[particleIndex];
@@ -342,6 +345,27 @@ public class ParticleSystem : IDisposable
         }
 
         return null;
+    }
+
+    public void Draw(Screen toScreen)
+    {
+        lock(colorsCPU) CopyColorsToGPU();
+
+        var gpuPositions = GetGPUPositions();
+        // var gpuLinks = particleSystem.GetGPULinks();
+        var gpuColors = GetGPUColors();
+        var gpuActive = GetGPUActive();
+
+        // DrawLines(gpuPositions, gpuLinks);
+        toScreen.DrawCircles(gpuPositions, gpuColors, gpuActive, particleRadius);
+    }
+
+    public void DrawBounds(Screen toScreen, Color color)
+    {
+        toScreen.DrawLineCPU(new Vector2(0, 0), new Vector2(boundsSize.X, 0), color, 20);
+        toScreen.DrawLineCPU(new Vector2(boundsSize.X, 0), new Vector2(boundsSize.X, boundsSize.Y), color, 20);
+        toScreen.DrawLineCPU(new Vector2(boundsSize.X, boundsSize.Y), new Vector2(0, boundsSize.Y), color, 20);
+        toScreen.DrawLineCPU(new Vector2(0, boundsSize.Y), new Vector2(0, 0), color, 20);
     }
 
     public void Dispose()

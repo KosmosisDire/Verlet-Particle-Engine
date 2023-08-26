@@ -1,3 +1,5 @@
+using ProtoEngine;
+
 namespace ParticlePhysics;
 
 public interface IHasID
@@ -17,7 +19,7 @@ public class ParticleLink : IHasID, IDestroyable
     public float length;
     public int ID { get; set; }
 
-    public int3 IntLink => new int3(particle1.ID, particle2.ID, Utils.SingleToInt32Bits(length));
+    public int3 IntLink => new(particle1.ID, particle2.ID, Extentions.SingleToInt32Bits(length));
 
     public readonly bool initialized = false;
 

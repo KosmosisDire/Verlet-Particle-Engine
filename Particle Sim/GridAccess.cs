@@ -1,8 +1,9 @@
 using System.Collections.Concurrent;
 using ComputeSharp;
 using SFML.System;
-using Engine.Rendering;
 using SFML.Graphics;
+using ProtoEngine;
+using ProtoEngine.Rendering;
 
 namespace ParticlePhysics.Internal;
 
@@ -12,8 +13,8 @@ public struct GridAccess : IDisposable
     // public ReadWriteBuffer<int> gridValueCounts;
     public ReadWriteBuffer<int> gridKeys;
     
-    public Vector2f cellSize;
-    public Vector2i cellCount;
+    public Vector2 cellSize;
+    public Vector2 cellCount;
     public int cellCountLinear;
 
     int[] itemIndiciesTemp;
@@ -21,20 +22,19 @@ public struct GridAccess : IDisposable
     public int[] gridKeysArray;
     public int[] gridValueCountsArray;
 
-    public Vector2i extents;
+    public Vector2 extents;
     readonly int objectCount;
 
-    public GridAccess(Vector2i cellCount, Vector2i extents, int objectCount)
+    public GridAccess(Vector2 cellCount, Vector2 extents, int objectCount)
     {
         this.extents = extents;
         this.objectCount = objectCount;
-        cellCountLinear = cellCount.X * cellCount.Y;
+        cellCountLinear = (int)cellCount.X * (int)cellCount.Y;
         gridValueCountsArray = new int[cellCountLinear];
 
 
         this.cellCount = cellCount;
-        this.cellSize = new Vector2f((float)extents.X / cellCount.X, (float)extents.Y / cellCount.Y);
-        this.cellCountLinear = cellCount.X * cellCount.Y;
+        this.cellSize = new Vector2((float)extents.X / cellCount.X, (float)extents.Y / cellCount.Y);
 
         gridValues = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<int>(objectCount + cellCountLinear); // counts for each cell are also stored in the same buffer
         // gridValueCounts = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<int>(cellCountLinear);
@@ -45,15 +45,15 @@ public struct GridAccess : IDisposable
         gridKeysArray = new int[cellCountLinear];
     }
     
-    public void SetCellCount(Vector2i cellCount)
+    public void SetCellCount(Vector2 cellCount)
     {
         if (cellCount == this.cellCount) return;
 
         lock(gridValues) lock(gridKeys) lock (gridKeysArray) lock (itemIndiciesTemp) lock (gridValuesArray)
         {
             this.cellCount = cellCount;
-            this.cellSize = new Vector2f((float)extents.X / cellCount.X, (float)extents.Y / cellCount.Y);
-            this.cellCountLinear = cellCount.X * cellCount.Y;
+            this.cellSize = new Vector2((float)extents.X / cellCount.X, (float)extents.Y / cellCount.Y);
+            this.cellCountLinear = (int)cellCount.X * (int)cellCount.Y;
 
             gridValues = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<int>(objectCount);
             // gridValueCounts = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<int>(cellCountLinear);
@@ -66,21 +66,21 @@ public struct GridAccess : IDisposable
     }
 
 
-    public int GetIndex(Vector2f position)
+    public int GetIndex(Vector2 position)
     {
         int x = (int)MathF.Floor(Math.Clamp(position.X / cellSize.X, 0, cellCount.X - 1));
         int y = (int)MathF.Floor(Math.Clamp(position.Y / cellSize.Y, 0, cellCount.Y - 1));
-        int index = x + y * cellCount.X;
+        int index = x + y * (int)cellCount.X;
 
         return index;
     }
 
-    public bool PositionInsideGrid(Vector2f position)
+    public bool PositionInsideGrid(Vector2 position)
     {
         return position.X >= 0 && position.X < extents.X && position.Y >= 0 && position.Y < extents.Y;
     }
 
-    public List<int> LineIntersectionIndicies(Vector2f start, Vector2f end, out List<Vector2f> intersections)
+    public List<int> LineIntersectionIndicies(Vector2 start, Vector2 end, out List<Vector2> intersections)
     {
         lock(gridValueCountsArray)
         {
@@ -88,16 +88,16 @@ public struct GridAccess : IDisposable
             // it will then average each neighboring intersection along the line and sample the index of the cell at that point
             
             List<int> indicies = new List<int>();
-            intersections = new List<Vector2f>();
+            intersections = new List<Vector2>();
 
             // calculate edges of grid
 
             for (int i = 0; i < cellCount.X + 1; i++)
             {
-                var edgeStart = new Vector2f(i * cellSize.X, 0);
-                var edgeEnd = new Vector2f(i * cellSize.X, extents.Y);
+                var edgeStart = new Vector2(i * cellSize.X, 0);
+                var edgeEnd = new Vector2(i * cellSize.X, extents.Y);
 
-                if(Math2D.LineSegmentsIntersect(start, end, edgeStart, edgeEnd, out Vector2f intersection))
+                if(Math2D.LineSegmentsIntersect(start, end, edgeStart, edgeEnd, out Vector2 intersection))
                 {
                     intersections.Add(intersection);
                 }
@@ -105,10 +105,10 @@ public struct GridAccess : IDisposable
 
             for (int i = 0; i < cellCount.Y + 1; i++)
             {
-                var edgeStart = new Vector2f(0, i * cellSize.Y);
-                var edgeEnd = new Vector2f(extents.X, i * cellSize.Y);
+                var edgeStart = new Vector2(0, i * cellSize.Y);
+                var edgeEnd = new Vector2(extents.X, i * cellSize.Y);
 
-                if (Math2D.LineSegmentsIntersect(start, end, edgeStart, edgeEnd, out Vector2f intersection))
+                if (Math2D.LineSegmentsIntersect(start, end, edgeStart, edgeEnd, out Vector2 intersection))
                 {
                     intersections.Add(intersection);
                 }
@@ -117,7 +117,7 @@ public struct GridAccess : IDisposable
             if (PositionInsideGrid(start)) intersections.Add(start);
             if (PositionInsideGrid(end)) intersections.Add(end);
 
-            intersections.Sort((a, b) => (a - start).Magnitude().CompareTo((b - start).Magnitude()));
+            intersections.Sort((a, b) => (a - start).Magnitude.CompareTo((b - start).Magnitude));
 
             // average intersections, and get index of cell at that point
             
@@ -142,22 +142,22 @@ public struct GridAccess : IDisposable
     
     public void DrawGrid(Screen screen, Color color)
     {
-        Vector2f[] starts = new Vector2f[cellCountLinear];
-        Vector2f[] ends = new Vector2f[cellCountLinear];
+        Vector2[] starts = new Vector2[cellCountLinear];
+        Vector2[] ends = new Vector2[cellCountLinear];
 
         for(int i = 0; i < (int)MathF.Max(cellCount.X, cellCount.Y); i++)
         {
             if (i < cellCount.X)
             {
-                var edgeStart = new Vector2f(i * cellSize.X, 0);
-                var edgeEnd = new Vector2f(i * cellSize.X, extents.Y);
+                var edgeStart = new Vector2(i * cellSize.X, 0);
+                var edgeEnd = new Vector2(i * cellSize.X, extents.Y);
                 starts[i] = edgeStart;
                 ends[i] = edgeEnd;
             }
             if (i < cellCount.Y)
             {
-                var edgeStart = new Vector2f(0, i * cellSize.Y);
-                var edgeEnd = new Vector2f(extents.X, i * cellSize.Y);
+                var edgeStart = new Vector2(0, i * cellSize.Y);
+                var edgeEnd = new Vector2(extents.X, i * cellSize.Y);
                 starts[i + (int)cellCount.X] = edgeStart;
                 ends[i + (int)cellCount.X] = edgeEnd;
             }
@@ -181,7 +181,7 @@ public struct GridAccess : IDisposable
             {
                 if(activeArray[i] == 0) continue;
 
-                var index = GetIndex(new Vector2f(positionsArray[i].X, positionsArray[i].Y));
+                var index = GetIndex(new Vector2(positionsArray[i].X, positionsArray[i].Y));
                 grid.itemIndiciesTemp[i] = index;
                 gridValueCountsLocal[index]++;
             }
@@ -248,7 +248,7 @@ public struct GridAccess : IDisposable
                 {
                     if (activeArray[i] == 0) continue;
 
-                    var index = grid.GetIndex(positionsArray[i].ToVector2f());
+                    var index = grid.GetIndex(positionsArray[i]);
                     grid.itemIndiciesTemp[i] = index;
                     Interlocked.Increment(ref gridValueCountsLocal[index]);
                 }
