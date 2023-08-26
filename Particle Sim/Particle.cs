@@ -19,8 +19,10 @@ public class Particle : IHasID, IDestroyable
     {
         get => Position.ToVector2f() - particleSystem.lastPositionsCPU[ID].ToVector2f();
 
-        set => particleSystem.lastPositionsCPU[ID] = (Position.ToVector2f() - value).ToFloat2();
+        set => particleSystem.lastPositionsCPU[ID] = (PositionF - value).ToFloat2();
     }
+
+    public readonly bool initialized = false;
 
     public void Accelerate(Vector2f acceleration)
     {
@@ -60,23 +62,14 @@ public class Particle : IHasID, IDestroyable
 
     public Particle(Vector2f position, Color color, ParticleSystem particleSystem)
     {
-        particleSystem.particles.Add(this);
-
         this.particleSystem = particleSystem;
-        this.PositionF = position;
-        particleSystem.lastPositionsCPU[ID] = position.ToFloat2();
-        particleSystem.colorsCPU[ID] = color.ToUInt32();
-        particleSystem.particleCount++;
+        particleSystem.AddParticle(this, position, color);
+        // this.PositionF = position;
+        initialized = true;
     }
 
     public void Destroy()
     {
-        particleSystem.particles.Remove(this);
-        particleSystem.particleCount--;
-        
-        for(int i = 0; i < links.Count;)
-        {
-            links[i].Destroy();
-        }
+        particleSystem.RemoveParticle(this);
     }
 }

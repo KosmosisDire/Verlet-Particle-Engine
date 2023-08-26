@@ -8,74 +8,46 @@ public class Camera
 {
     public Vector2f centerWorld;
     public float scale;
-    Canvas canvas;
-
-
-    public Vector2f Resolution => new Vector2f(canvas.width, canvas.height);
-    public Vector2f SizeWorld => Resolution * scale;
-    public Rect RectBoundsWorld => new Rect(centerWorld.ToFloat2(), SizeWorld.ToFloat2()){scale = scale};
-
-    public float wheelDelta;
-
-
-
-    public Camera(Vector2f center, Canvas activeCanvas, float scale = 1)
+    private Screen? viewingScreen;
+    public Screen? ViewingScreen
     {
-        this.centerWorld = center;
-        this.canvas = activeCanvas;
-        activeCanvas.viewCamera = this;
-        this.scale = scale;
-        canvas.window.MouseWheelScrolled += (sender, e) => 
+        get => viewingScreen;
+        set
         {
-            wheelDelta = e.Delta;
-        };
+            if(value == null) return;
+            viewingScreen = value;
+            if(viewingScreen.ActiveCamera != this) viewingScreen.ActiveCamera = this;
+        }
     }
 
-    // Vector2f mouseDelta;
-    // Vector2f lastPos;
-    bool firstMiddleMouseFrame = true;
+    public Vector2f WorldSize => (viewingScreen?.Resolution ?? new Vector2f(0,0)) * scale;
+    public Rect RectBoundsWorld => new(centerWorld.ToFloat2(), WorldSize.ToFloat2()){scale = scale};
+
+    public Camera(Vector2f center, float scale = 1, Screen? viewingScreen = null)
+    {
+        this.centerWorld = center;
+        this.scale = scale;
+        ViewingScreen = viewingScreen;
+    }
+
     public void UpdatePanning(Mouse.Button button)
     {
-        //camera panning
-        Vector2f mousePos = (Vector2f)Mouse.GetPosition(canvas.window);
+        if(viewingScreen == null) return;
 
-        if(Mouse.IsButtonPressed(button) && !GUIManager.IsMouseOverUI())
+        if (Mouse.IsButtonPressed(button) && !GUIManager.IsMouseCapturedByUI())
         {
-            // mouseDelta = mousePos - lastPos;
-            centerWorld -= (MouseGestures.mouseDelta * scale);
+            centerWorld -= viewingScreen.mouseDelta * scale;
         }
-        else firstMiddleMouseFrame = true;
-
-        //lastPos = mousePos;
     }
 
     public void UpdateZooming()
     {
+        if(viewingScreen == null) return;
+        
         //camera zooming
-        if (wheelDelta != 0)
+        if (viewingScreen.wheelDelta != 0)
         {
-            scale -= wheelDelta * scale * 0.1f;
-            wheelDelta = 0;
+            scale -= viewingScreen.wheelDelta * scale * 0.1f;
         }
-    }
-
-    public Vector2f ScreenToWorld(Vector2f screenPos)
-    {
-        return (screenPos * scale) + (centerWorld - SizeWorld/2);
-    }
-
-    public Vector2f ScreenToWorld(Vector2i screenPos)
-    {
-        return ScreenToWorld((Vector2f)screenPos);
-    }
-
-    public Vector2f WorldToScreen(Vector2f worldPos)
-    {
-        return (worldPos - (centerWorld - SizeWorld/2)) / scale;
-    }
-
-    public Vector2f WorldToScreen(Vector2i worldPos)
-    {
-        return WorldToScreen((Vector2f)worldPos);
     }
 }

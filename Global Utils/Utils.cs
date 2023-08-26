@@ -97,7 +97,7 @@ public static class Utils
     public static float TestTiming(Action action, int iterations)
     {
         var sw = Stopwatch.StartNew();
-        for (var i = 0; i < iterations; i++)
+        for (int i = 0; i < iterations; i++)
         {
             action();
         }
@@ -111,7 +111,7 @@ public static class Utils
         float timeTotal2 = 0;
 
         var sw = Stopwatch.StartNew();
-        for (var i = 0; i < iterations; i++)
+        for (int i = 0; i < iterations; i++)
         {
             sw.Restart();
             action1();
@@ -138,7 +138,7 @@ public static class Utils
         float timeTotal3 = 0;
 
         var sw = Stopwatch.StartNew();
-        for (var i = 0; i < iterations; i++)
+        for (int i = 0; i < iterations; i++)
         {
             sw.Restart();
             action1();
@@ -173,7 +173,7 @@ public static class Utils
         float timeTotal4 = 0;
 
         var sw = Stopwatch.StartNew();
-        for (var i = 0; i < iterations; i++)
+        for (int i = 0; i < iterations; i++)
         {
             sw.Restart();
             action1();

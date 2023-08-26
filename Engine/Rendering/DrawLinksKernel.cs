@@ -14,20 +14,29 @@ internal readonly partial struct DrawLinksKernel : IComputeShader
     public readonly Rect cameraRect;
     public readonly uint color;
 
-    public void Execute()
+    public void DrawLineFromID(int id)
     {
-        int4 link = links[ThreadIds.X];
+        int4 link = links[id];
         if(link.W == 0) return; // inactive link
         int a = link.X;
         int b = link.Y;
 
-        float2 position1 = (positions[a] - cameraRect.topLeft) / (cameraRect.scale);
-        float2 position2 = (positions[b] - cameraRect.topLeft) / (cameraRect.scale);
+        float2 position1 = (positions[a] - cameraRect.topLeft) / cameraRect.scale;
+        float2 position2 = (positions[b] - cameraRect.topLeft) / cameraRect.scale;
+        float2 dist = position2 - position1;
 
-        if ((Hlsl.Any(position1 < 0) || Hlsl.Any(position1 > resolution)) && (Hlsl.Any(position2 < 0) || Hlsl.Any(position2 > resolution)))
+        if (((Hlsl.Any(position1 < 0) || Hlsl.Any(position1 > resolution)) && (Hlsl.Any(position2 < 0) || Hlsl.Any(position2 > resolution))) || Hlsl.Dot(dist, dist) < 50)
             return;
 
         DrawLine(position1, position2, color);
+    }
+
+    public void Execute()
+    {
+        for (int i = 0; i < 10; i++)
+        {
+            DrawLineFromID(ThreadIds.X + links.Length / 10 * i);
+        }
     }
 
     public void SetColor(int2 coord, uint c)

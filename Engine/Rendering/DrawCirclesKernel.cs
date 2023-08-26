@@ -60,10 +60,8 @@ internal readonly partial struct DrawCirclesKernel : IComputeShader
 
     }
 
-    public void Execute()
+    public void DrawCircleFromID(int id)
     {
-        int id = ThreadIds.X;
-
         if(id >= positions.Length) return;
 
         if(active[id] == 0) return;
@@ -95,6 +93,14 @@ internal readonly partial struct DrawCirclesKernel : IComputeShader
                     SetColor(coord, colors[id]);
                 }
             }
+        }
+    }
+
+    public void Execute()
+    {
+        for (int i = 0; i < 10; i++)
+        {
+            DrawCircleFromID(ThreadIds.X + positions.Length / 10 * i);
         }
     }
 }

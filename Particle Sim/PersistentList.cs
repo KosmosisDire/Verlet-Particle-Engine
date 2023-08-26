@@ -1,14 +1,19 @@
+using System.Collections;
 namespace ParticlePhysics.Internal;
 
-public class PersistentList<T>
+// this is a dynamic random access array that allows for the index of an item to stay the same even when items are added and removed around it.
+// It also has very fast add and remove operations at the expense of memory usage.
+public class PersistentList<T> : IEnumerable
 {
     protected T[] items;
     protected int[] active;
-    protected Queue<int> reusableIDs = new Queue<int>();
+    protected Queue<int> reusableIDs = new();
     protected int nextID;
-    protected int maxCapacity;
+    protected int capacity;
     protected bool reuseOldAtMaxCapacity;
     protected bool buildActiveList;
+
+    public int Capacity => items.Length;
 
     public PersistentList(int startingCapacity, int maxCapacity, bool reuseOldAtMaxCapacity = false, bool buildActiveList = false)
     {
@@ -22,9 +27,13 @@ public class PersistentList<T>
         }
 
         items = new T[startingCapacity];
+
         if(buildActiveList)
             active = new int[startingCapacity];
-        this.maxCapacity = maxCapacity;
+        else
+            active = new int[0];
+
+        this.capacity = maxCapacity;
         this.reuseOldAtMaxCapacity = reuseOldAtMaxCapacity;
         nextID = 0;
         this.buildActiveList = buildActiveList;
@@ -35,8 +44,6 @@ public class PersistentList<T>
         get => items[id];
         set => items[id] = value;
     }
-
-    public int Count => items.Length;
 
     public virtual int Add(T item)
     {
@@ -49,11 +56,11 @@ public class PersistentList<T>
         {
             if (nextID >= items.Length)
             {
-                if(items.Length < maxCapacity)
+                if(items.Length < capacity)
                 {
-                    Array.Resize(ref items, (int)MathF.Min(items.Length * 2, maxCapacity));
+                    Array.Resize(ref items, (int)MathF.Min(items.Length * 2, capacity));
                     if(buildActiveList)
-                        Array.Resize(ref active, (int)MathF.Min(items.Length * 2, maxCapacity));
+                        Array.Resize(ref active, (int)MathF.Min(items.Length * 2, capacity));
                 }
                 else if(reuseOldAtMaxCapacity)
                 {
@@ -110,6 +117,20 @@ public class PersistentList<T>
         nextID = 0;
         reusableIDs.Clear();
     }
+
+    public IEnumerator<T> GetEnumerator()
+    {
+        if(!buildActiveList)
+            throw new Exception("PersistentList was not built with buildActiveList = true");
+
+        for(int i = 0; i < items.Length; i++)
+        {
+            if(active[i] == 1 && items[i] != null)
+                yield return items[i];
+        }
+    }
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }
 
 public class PersistentListID<T> : PersistentList<T> where T : IHasID
@@ -158,11 +179,11 @@ public class PersistentListDestroyable<T> : PersistentList<T> where T : IHasID, 
         {
             if (nextID >= items.Length)
             {
-                if(items.Length < maxCapacity)
+                if(items.Length < capacity)
                 {
-                    Array.Resize(ref items, (int)MathF.Min(items.Length * 2, maxCapacity));
+                    Array.Resize(ref items, (int)MathF.Min(items.Length * 2, capacity));
                     if(buildActiveList)
-                        Array.Resize(ref active, (int)MathF.Min(items.Length * 2, maxCapacity));
+                        Array.Resize(ref active, (int)MathF.Min(items.Length * 2, capacity));
                 }
                 else if(reuseOldAtMaxCapacity)
                 {

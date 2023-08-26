@@ -17,11 +17,12 @@ public class ParticleLink : IHasID, IDestroyable
     public float length;
     public int ID { get; set; }
 
-    public int4 IntLink => new int4(particle1.ID, particle2.ID, Utils.SingleToInt32Bits(length), 1);
+    public int3 IntLink => new int3(particle1.ID, particle2.ID, Utils.SingleToInt32Bits(length));
+
+    public readonly bool initialized = false;
 
     public ParticleLink(Particle particle1, Particle particle2, float length)
     {
-
         this.particle1 = particle1;
         this.particle2 = particle2;
         this.length = length;
@@ -31,27 +32,27 @@ public class ParticleLink : IHasID, IDestroyable
             throw new Exception("Two linked particles are not in the same particle system");
         }
 
-        particle1.linkedParticles.Add(particle2);
-        particle2.linkedParticles.Add(particle1);
+        if(particle1 == particle2)
+        {
+            throw new Exception("Two linked particles are the same");
+        }
 
-        particle1.links.Add(this);
-        particle2.links.Add(this);
+        if(particle1.linkedParticles.Count >= particle1.particleSystem.maxLinksPerParticle)
+        {
+            throw new Exception("Particle 1 has too many links, max is " + particle1.particleSystem.maxLinksPerParticle);
+        }
 
-        particle1.particleSystem.particleLinks.Add(this);
-        particle1.particleSystem.linksCPU.Add(IntLink);
-        particle1.particleSystem.linkStrainCPU.Add(0);
+        if(particle2.linkedParticles.Count >= particle2.particleSystem.maxLinksPerParticle)
+        {
+            throw new Exception("Particle 2 has too many links, max is " + particle2.particleSystem.maxLinksPerParticle);
+        }
+
+        particle1.particleSystem.AddLink(this);
+        initialized = true;
     }
 
     public void Destroy()
     {
-        particle1.linkedParticles.Remove(particle2);
-        particle2.linkedParticles.Remove(particle1);
-        
-        particle1.links.Remove(this);
-        particle2.links.Remove(this);
-
-        particle1.particleSystem.particleLinks.Remove(this);
-        particle1.particleSystem.linksCPU.Remove(ID);
-        particle1.particleSystem.linkStrainCPU.Remove(ID);
+        particle1.particleSystem.RemoveLink(this);
     }
 }

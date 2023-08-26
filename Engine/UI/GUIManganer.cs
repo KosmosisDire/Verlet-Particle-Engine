@@ -57,7 +57,7 @@ public static class GUIManager
         foreach (Panel panel in panels)
         {
             panel.UpdateRects();
-            panel.Draw(window);
+            panel.Draw();
         }
     }
 

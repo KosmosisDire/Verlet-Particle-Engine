@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Collections.Concurrent;
 using SFML.Window;
 
 namespace Engine;
@@ -7,9 +8,9 @@ namespace Engine;
 public class Loop
 {
     public string name { get; private set; }
-    Thread loopThread;
+    readonly Thread loopThread;
     public event EngineLoop.LoopEvent? OnLoop;
-    List<Action> threadQueue = new List<Action>();
+    readonly ConcurrentQueue<Action> threadQueue = new();
 
     private int _targetFPS;
     public int targetFPS 
@@ -66,18 +67,18 @@ public class Loop
                 ThreadStep();
 
                 frameTimer.Stop();
-                var frameTime = (float)frameTimer.ElapsedTicks / 10000 / 1000; // Convert ticks to seconds
+                float frameTime = (float)frameTimer.ElapsedTicks / 10000 / 1000; // Convert ticks to seconds
                 if (frameTime > 0)
                     measuredFPS = (measuredFPS * 0.95f) + 1.0f / frameTime * 0.05f;
                 
-                var waitTime = Math.Max(0, deltaTime - frameTime);
+                float waitTime = Math.Max(0, deltaTime - frameTime);
                 Thread.Sleep((int)(waitTime * 1000));
             }
 
             if (stepCountdown > 0)
             {
-                stepCountdown--;
                 ThreadStep();
+                stepCountdown--;
             }
             else
             {
@@ -90,14 +91,12 @@ public class Loop
 
     void ThreadStep()
     {
-        lock(threadQueue)
+        while (threadQueue.Count > 0)
         {
-            foreach (Action action in threadQueue)
-            {
-                action();
-            }
+            threadQueue.TryDequeue(out Action? action);
+            action?.Invoke();
         }
-        threadQueue.Clear();
+        
         OnLoop?.Invoke(1/measuredFPS);
     }
 
@@ -124,6 +123,7 @@ public class Loop
 
     public void Step(int steps)
     {
+        if(steps < 0) throw new Exception("Steps must be positive");
         stepCountdown = steps;
     }
 
@@ -134,22 +134,16 @@ public class Loop
 
     public void RunAction(Action action)
     {
-        lock(threadQueue)
-        {
-            threadQueue.Add(action);
-        }
+        threadQueue.Enqueue(action);
     }
 
     public void RunActionSync(Action action)
     {
-        lock(threadQueue)
-        {
-            threadQueue.Add(action);
-        }
+        threadQueue.Enqueue(action);
 
         Step();
 
-        while (threadQueue.Count > 0)
+        while (stepCountdown > 0)
         {
             Thread.Sleep(1);
         }
@@ -223,7 +217,7 @@ public static class EngineLoop
         RemoveLoop(loop.name);
     }
 
-    public static void StopAllLoops()
+    public static void AbortAllLoops()
     {
         foreach (Loop loop in loops.Values)
         {

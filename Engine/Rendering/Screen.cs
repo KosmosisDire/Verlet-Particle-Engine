@@ -5,24 +5,43 @@ using ProtoGUI;
 using SFML.System;
 using ParticlePhysics;
 using Engine.Rendering.Internal;
+using System.Collections.Concurrent;
 
 namespace Engine.Rendering;
 
-public class Canvas
+public class Screen
 {
     public int width;
     public int height;
-    public float2 mousePosition;
+    public Vector2f Resolution => new(width, height);
+    public Rect Bounds => new(new(0,0), new(width, height));
+    public bool isMouseOnScreen;
+    public Vector2f mousePosition;
+    private Vector2f lastMousePosition;
+    public Vector2f mouseDelta;
+    public Vector2f mouseDeltaWorld;
+    public float wheelDelta;
 
     public readonly RenderWindow window;
-    public Camera viewCamera;
-    byte[] bitmapData;
+
+    readonly byte[] bitmapData;
     uint[] bitmapDataInt;
     uint[] blankData;
-    ReadWriteBuffer<uint> bitmapBuffer;
+    readonly ReadWriteBuffer<uint> bitmapBuffer;
     readonly Sprite renderSprite;
+    private Camera? activeCamera;
+    public Camera? ActiveCamera 
+    { 
+        get => activeCamera; 
+        set 
+        {
+            if(value == null) return;
+            activeCamera = value;
+            if(activeCamera.ViewingScreen != this) activeCamera.ViewingScreen = this;
+        }
+    }
 
-    public Canvas(string name, Loop drawLoop, int width = 1920, int height = 1080, bool fullscreen = false)
+    public Screen(string name, Loop drawLoop, int width = 1920, int height = 1080, bool fullscreen = false)
     {
         this.width = width;
         this.height = height;
@@ -30,18 +49,22 @@ public class Canvas
         window.SetVerticalSyncEnabled(true);
         window.SetFramerateLimit(144);
 
-        window.Closed += (obj, e) => { window.Close(); EngineLoop.StopAllLoops();};
+        window.Closed += (obj, e) => { window.Close(); EngineLoop.AbortAllLoops();};
         window.KeyPressed += (sender, e) =>
         {
             if(sender == null) return;
             Window window = (Window)sender;
             if (e.Code == Keyboard.Key.Escape)
             {
-                EngineLoop.StopAllLoops();
+                EngineLoop.AbortAllLoops();
                 window.Close();
             }
         };
-        window.MouseMoved += (sender, e) => mousePosition = Mouse.GetPosition(window).ToFloat2();
+
+        window.MouseWheelScrolled += (sender, e) => 
+        {
+            wheelDelta = e.Delta;
+        };
 
         renderSprite = new Sprite(new Texture(new Image((uint)width, (uint)height)));
 
@@ -51,9 +74,29 @@ public class Canvas
 
         bitmapBuffer = GraphicsDevice.GetDefault().AllocateReadWriteBuffer(blankData);
         
-        drawLoop.Connect(UpdateCanvas);
+        drawLoop.RunAction(() => drawLoop.Connect(UpdateScreen));
         
         GUIManager.window = window;
+    }
+
+    public Vector2f ScreenToWorld(Vector2f screenPos)
+    {
+        return (screenPos * activeCamera?.scale) + (activeCamera?.centerWorld - activeCamera?.WorldSize/2) ?? screenPos;
+    }
+
+    public Vector2f ScreenToWorld(Vector2i screenPos)
+    {
+        return ScreenToWorld((Vector2f)screenPos);
+    }
+
+    public Vector2f WorldToScreen(Vector2f worldPos)
+    {
+        return ((worldPos - (activeCamera?.centerWorld - activeCamera?.WorldSize/2)) / activeCamera?.scale) ?? worldPos;
+    }
+
+    public Vector2f WorldToScreen(Vector2i worldPos)
+    {
+        return WorldToScreen((Vector2f)worldPos);
     }
 
     public void SetFillColor(uint4 color)
@@ -61,19 +104,23 @@ public class Canvas
         blankData = Enumerable.Repeat(Utils.RGBAToInt(color), blankData.Length).ToArray();
     }
 
-    void UpdateCanvas(float dt)
+    void UpdateScreen(float dt)
     {
+        wheelDelta = 0;
         window.DispatchEvents();
+
+        mousePosition = window.MapPixelToCoords(Mouse.GetPosition(window));
+        isMouseOnScreen = mousePosition.X >= 0 && mousePosition.X < width && mousePosition.Y >= 0 && mousePosition.Y < height;
+        mouseDelta = mousePosition - lastMousePosition;
+        mouseDeltaWorld = ScreenToWorld(mousePosition) - ScreenToWorld(lastMousePosition);
+        lastMousePosition = mousePosition;
+
+
         window.Clear();
         ApplyBitmap();
         window.Draw(renderSprite);
         GUIManager.Update(dt);
         window.Display();
-    }
-
-    public Vector2f GetMousePosition()
-    {
-        return ((Vector2f)Mouse.GetPosition(window));
     }
 
     public void ApplyBitmap()
@@ -105,12 +152,12 @@ public class Canvas
 
     public void DrawCircles(ReadWriteBuffer<float2> positions, ReadOnlyBuffer<uint> colors, ReadOnlyBuffer<int> active, float radius)
     {
-        GraphicsDevice.GetDefault().For(positions.Length, new DrawCirclesKernel(positions, colors, bitmapBuffer, active, new int2(width, height), viewCamera.RectBoundsWorld, radius, true));
+        GraphicsDevice.GetDefault().For(positions.Length/10, new DrawCirclesKernel(positions, colors, bitmapBuffer, active, new int2(width, height), activeCamera?.RectBoundsWorld ?? Bounds, radius, true));
     }
 
     public void DrawLines(ReadWriteBuffer<float2> positions, ReadOnlyBuffer<int4> links)
     {
-        GraphicsDevice.GetDefault().For(links.Length, new DrawLinksKernel(links, positions, bitmapBuffer, new int2(width, height), viewCamera.RectBoundsWorld, 0xe4b28fFF));
+        GraphicsDevice.GetDefault().For(links.Length/10, new DrawLinksKernel(links, positions, bitmapBuffer, new int2(width, height), activeCamera?.RectBoundsWorld ?? Bounds, 0xe4b28fFF));
     }
 
     public void DrawLines(Vector2f[] starts, Vector2f[] ends, Color color)
@@ -124,20 +171,35 @@ public class Canvas
         float2[] positionsArray = new float2[starts.Length + ends.Length];
         int4[] linksArray = new int4[starts.Length];
 
-        for (var i = 0; i < starts.Length; i++)
+        for (int i = 0; i < starts.Length; i++)
         {
             positionsArray[i] = starts[i].ToFloat2();
             positionsArray[i + starts.Length] = ends[i].ToFloat2();
-            linksArray[i] = new int4(i, i + starts.Length, 0, 0);
+            linksArray[i] = new int4(i, i + starts.Length, 1, 1);
         }
 
         var positions = GraphicsDevice.GetDefault().AllocateReadWriteBuffer(positionsArray);
         var links = GraphicsDevice.GetDefault().AllocateReadOnlyBuffer(linksArray);
 
-        GraphicsDevice.GetDefault().For(links.Length, new DrawLinksKernel(links, positions, bitmapBuffer, new int2(width, height), viewCamera.RectBoundsWorld, color.ToInteger()));
-    
+        GraphicsDevice.GetDefault().For(links.Length, new DrawLinksKernel(links, positions, bitmapBuffer, new int2(width, height), activeCamera?.RectBoundsWorld ?? Bounds, color.ToInteger()));
+
         positions.Dispose();
         links.Dispose();
+    }
+
+    public void DrawLinesCPU(Vector2f[] starts, Vector2f[] ends, Color color, int dottedInterval = 0)
+    {
+        if(starts.Length != ends.Length) throw new Exception("Starts and ends must be the same length");
+
+        var partitioner = Partitioner.Create(0, starts.Length, starts.Length/Environment.ProcessorCount);
+
+        Parallel.ForEach(partitioner, (range, loopState) =>
+        {
+            for (int i = range.Item1; i < range.Item2; i++)
+            {
+                DrawLineCPU(starts[i], ends[i], color, dottedInterval);
+            }
+        });
     }
 
     public void DrawPixelCPU(Vector2f pos, Color color)
@@ -148,8 +210,8 @@ public class Canvas
 
     public void DrawLineCPU(Vector2f start, Vector2f end, Color color, int dottedInterval = 0)
     {
-        var startScreen = viewCamera.WorldToScreen(start);
-        var endScreen = viewCamera.WorldToScreen(end);
+        var startScreen = WorldToScreen(start);
+        var endScreen = WorldToScreen(end);
 
         var x1 = (int)startScreen.X;
         var y1 = (int)startScreen.Y;
@@ -192,12 +254,11 @@ public class Canvas
         }
     }
 
+    // draws the outline of a circle using Bresenham's circle algorithm
     public void DrawCircleCPU(Vector2f pos, float radius, Color color)
     {
-        // draws the outline of a circle using Bresenham's circle algorithm
-
         //adjust for camera bounds
-        pos = viewCamera.WorldToScreen(pos);
+        pos = WorldToScreen(pos);
 
         int x = (int)pos.X;
         int y = (int)pos.Y;
@@ -235,20 +296,20 @@ public class Canvas
         lock(particleSystem.colorsCPU) particleSystem.CopyColorsToGPU();
 
         var gpuPositions = particleSystem.GetGPUPositions();
-        var gpuLinks = particleSystem.GetGPULinks();
+        // var gpuLinks = particleSystem.GetGPULinks();
         var gpuColors = particleSystem.GetGPUColors();
         var gpuActive = particleSystem.GetGPUActive();
 
-        DrawLines(gpuPositions, gpuLinks);
+        // DrawLines(gpuPositions, gpuLinks);
         DrawCircles(gpuPositions, gpuColors, gpuActive, particleSystem.particleRadius);
     }
 
     public void DrawParticleSystemBounds(ParticleSystem particleSystem, Color color)
     {
-        DrawLineCPU(new Vector2f(0, 0), new Vector2f(particleSystem.worldExtents.X, 0), color, 20);
-        DrawLineCPU(new Vector2f(particleSystem.worldExtents.X, 0), new Vector2f(particleSystem.worldExtents.X, particleSystem.worldExtents.Y), color, 20);
-        DrawLineCPU(new Vector2f(particleSystem.worldExtents.X, particleSystem.worldExtents.Y), new Vector2f(0, particleSystem.worldExtents.Y), color, 20);
-        DrawLineCPU(new Vector2f(0, particleSystem.worldExtents.Y), new Vector2f(0, 0), color, 20);
+        DrawLineCPU(new Vector2f(0, 0), new Vector2f(particleSystem.boundsSize.X, 0), color, 20);
+        DrawLineCPU(new Vector2f(particleSystem.boundsSize.X, 0), new Vector2f(particleSystem.boundsSize.X, particleSystem.boundsSize.Y), color, 20);
+        DrawLineCPU(new Vector2f(particleSystem.boundsSize.X, particleSystem.boundsSize.Y), new Vector2f(0, particleSystem.boundsSize.Y), color, 20);
+        DrawLineCPU(new Vector2f(0, particleSystem.boundsSize.Y), new Vector2f(0, 0), color, 20);
     }
 
 }

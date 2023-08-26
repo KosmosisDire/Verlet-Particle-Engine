@@ -9,7 +9,7 @@ namespace ParticlePhysics.Internal;
 public struct GridAccess : IDisposable
 {
     public ReadWriteBuffer<int> gridValues;
-    public ReadWriteBuffer<int> gridValueCounts;
+    // public ReadWriteBuffer<int> gridValueCounts;
     public ReadWriteBuffer<int> gridKeys;
     
     public Vector2f cellSize;
@@ -26,34 +26,37 @@ public struct GridAccess : IDisposable
 
     public GridAccess(Vector2i cellCount, Vector2i extents, int objectCount)
     {
-        this.cellCount = cellCount;
         this.extents = extents;
         this.objectCount = objectCount;
+        cellCountLinear = cellCount.X * cellCount.Y;
+        gridValueCountsArray = new int[cellCountLinear];
+
+
+        this.cellCount = cellCount;
         this.cellSize = new Vector2f((float)extents.X / cellCount.X, (float)extents.Y / cellCount.Y);
         this.cellCountLinear = cellCount.X * cellCount.Y;
 
-        gridValues = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<int>(objectCount);
-        gridValueCounts = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<int>(cellCountLinear);
+        gridValues = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<int>(objectCount + cellCountLinear); // counts for each cell are also stored in the same buffer
+        // gridValueCounts = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<int>(cellCountLinear);
         gridKeys = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<int>(cellCountLinear);
 
         itemIndiciesTemp = new int[objectCount];
-        gridValuesArray = new int[objectCount];
+        gridValuesArray = new int[objectCount + cellCountLinear]; // counts for each cell are also stored in the same buffer
         gridKeysArray = new int[cellCountLinear];
-        gridValueCountsArray = new int[cellCountLinear];
     }
     
     public void SetCellCount(Vector2i cellCount)
     {
         if (cellCount == this.cellCount) return;
 
-        lock(gridValues) lock(gridValueCounts) lock(gridKeys) lock (gridKeysArray) lock (itemIndiciesTemp) lock (gridValuesArray)
+        lock(gridValues) lock(gridKeys) lock (gridKeysArray) lock (itemIndiciesTemp) lock (gridValuesArray)
         {
             this.cellCount = cellCount;
             this.cellSize = new Vector2f((float)extents.X / cellCount.X, (float)extents.Y / cellCount.Y);
             this.cellCountLinear = cellCount.X * cellCount.Y;
 
             gridValues = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<int>(objectCount);
-            gridValueCounts = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<int>(cellCountLinear);
+            // gridValueCounts = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<int>(cellCountLinear);
             gridKeys = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<int>(cellCountLinear);
 
             itemIndiciesTemp = new int[objectCount];
@@ -137,12 +140,12 @@ public struct GridAccess : IDisposable
     }
 
     
-    public void DrawGrid(Canvas canvas, Color color)
+    public void DrawGrid(Screen screen, Color color)
     {
         Vector2f[] starts = new Vector2f[cellCountLinear];
         Vector2f[] ends = new Vector2f[cellCountLinear];
 
-        for(var i = 0; i < (int)MathF.Max(cellCount.X, cellCount.Y); i++)
+        for(int i = 0; i < (int)MathF.Max(cellCount.X, cellCount.Y); i++)
         {
             if (i < cellCount.X)
             {
@@ -160,12 +163,12 @@ public struct GridAccess : IDisposable
             }
         }
 
-        canvas.DrawLines(starts, ends, color);
+        screen.DrawLinesCPU(starts, ends, color, 10);
     }
 
     public void BuildGrid(float2[] positionsArray, int[] activeArray)
     {
-        lock(gridValues) lock(gridValueCounts) lock(gridKeys) lock (gridKeysArray) lock(gridValueCountsArray)
+        lock(gridValues) lock(gridKeys) lock (gridKeysArray) lock(gridValueCountsArray)
         {
             
             var gridValueCountsLocal = new int[cellCountLinear];
@@ -174,7 +177,7 @@ public struct GridAccess : IDisposable
 
             // store the item indicies in a temp array and
             // count up the number of values in each cell
-            for(var i = 0; i < positionsArray.Length; i++)
+            for(int i = 0; i < positionsArray.Length; i++)
             {
                 if(activeArray[i] == 0) continue;
 
@@ -190,7 +193,7 @@ public struct GridAccess : IDisposable
 
             gridKeysArray[0] = 0;
 
-            for (var i = 0; i < grid.gridKeysArray.Length-1; i++)
+            for (int i = 0; i < grid.gridKeysArray.Length-1; i++)
             {
                 grid.gridKeysArray[i+1] = grid.gridKeysArray[i] + gridValueCountsLocal[i];
                 gridValueCountsLocal[i] = 0;
@@ -200,7 +203,7 @@ public struct GridAccess : IDisposable
 
             // store the particle indicies in the grid values array
             // the grid values are the actual indicies that are passed into the particle data arrays to get data about that particle
-            for (var i = 0; i < positionsArray.Length; i++)
+            for (int i = 0; i < positionsArray.Length; i++)
             {
                 if (activeArray[i] == 0) continue;
                 
@@ -218,7 +221,7 @@ public struct GridAccess : IDisposable
             }
 
             gridValues.CopyFrom(gridValuesArray);
-            gridValueCounts.CopyFrom(gridValueCountsLocal);
+            // gridValueCounts.CopyFrom(gridValueCountsLocal);
             gridKeys.CopyFrom(gridKeysArray);
             gridValueCountsArray = gridValueCountsLocal;
 
@@ -227,21 +230,21 @@ public struct GridAccess : IDisposable
 
     // runs the build grid method using Parallel.ForEach and a partitioner
     // locks the gridValues, gridValueCounts, gridKeys, and itemIndiciesTemp arrays
-    public void BuildGridThreaded(float2[] positionsArray, int[] activeArray)
+    public void BuildGridThreaded(float2[] positionsArray, int[] activeArray, int numThreads)
     {
-        lock(gridValues) lock(gridValueCounts) lock(gridKeys) lock (gridKeysArray) lock(gridValueCountsArray)
+        lock(gridValues) lock(gridKeys) lock (gridKeysArray) lock(gridValueCountsArray)
         {
             var gridValueCountsLocal = new int[cellCountLinear];
 
             GridAccess grid = this;
 
-            var partitioner = Partitioner.Create(0, positionsArray.Length, positionsArray.Length / Environment.ProcessorCount);
+            var partitioner = Partitioner.Create(0, positionsArray.Length, positionsArray.Length / numThreads);
 
             // store the item indicies in a temp array and
             // count up the number of values in each cell
             Parallel.ForEach(partitioner, range =>
             {
-                for (var i = range.Item1; i < range.Item2; i++)
+                for (int i = range.Item1; i < range.Item2; i++)
                 {
                     if (activeArray[i] == 0) continue;
 
@@ -256,10 +259,13 @@ public struct GridAccess : IDisposable
             // set the value counts to 0 because we will use it as a counter in the next pass
 
             gridKeysArray[0] = 0;
+            grid.gridValuesArray[0] = gridValueCountsLocal[0];
 
-            for (var i = 0; i < grid.gridKeysArray.Length - 1; i++)
+            for (int i = 0; i < grid.gridKeysArray.Length - 1; i++)
             {
-                grid.gridKeysArray[i + 1] = grid.gridKeysArray[i] + gridValueCountsLocal[i];
+                int key = grid.gridKeysArray[i] + gridValueCountsLocal[i] + 1; // +1 because the first value is the count of values in the cell
+                grid.gridKeysArray[i + 1] = key;
+                grid.gridValuesArray[key] = gridValueCountsLocal[i+1];
                 gridValueCountsLocal[i] = 0;
             }
 
@@ -269,13 +275,13 @@ public struct GridAccess : IDisposable
             // the grid values are the actual indicies that are passed into the particle data arrays to get data about that particle
             Parallel.ForEach(partitioner, range =>
             {
-                for (var i = range.Item1; i < range.Item2; i++)
+                for (int i = range.Item1; i < range.Item2; i++)
                 {
                     if (activeArray[i] == 0) continue;
 
                     var index = grid.itemIndiciesTemp[i];
 
-                    var valueIndex = grid.gridKeysArray[index] + gridValueCountsLocal[index];
+                    var valueIndex = grid.gridKeysArray[index] + gridValueCountsLocal[index] + 1; // +1 because the first value is the count of values in the cell
 
                     if (valueIndex >= grid.gridValuesArray.Length)
                     {
@@ -288,17 +294,16 @@ public struct GridAccess : IDisposable
             });
 
             gridValues.CopyFrom(gridValuesArray);
-            gridValueCounts.CopyFrom(gridValueCountsLocal);
+            // gridValueCounts.CopyFrom(gridValueCountsLocal);
             gridKeys.CopyFrom(gridKeysArray);
             gridValueCountsArray = gridValueCountsLocal;
-            
         }
     }
 
     public void Dispose()
     {
         gridValues.Dispose();
-        gridValueCounts.Dispose();
+        // gridValueCounts.Dispose();
         gridKeys.Dispose();
     }
 }

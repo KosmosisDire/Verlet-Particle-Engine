@@ -3,6 +3,9 @@ using SFML.Graphics;
 using SFML.System;
 using ParticlePhysics.Internal;
 using System.Diagnostics;
+using System.Collections;
+using TerraFX.Interop.Windows;
+using System.Collections.Concurrent;
 
 namespace ParticlePhysics;
 
@@ -11,9 +14,16 @@ public class ParticleSystem : IDisposable
 {
     //General Properties
     public int maxParticles;
-    public int particleCount = 0;
+    public int maxLinks;
+    public int maxLinksPerParticle = 6;
+    private int particleCount = 0;
+    private int linkCount = 0;
+    
+    public int ParticleCount => particleCount;
+    public int LinkCount => linkCount;
+
     public float particleRadius { get; private set; }
-    public Vector2i worldExtents { get; private set; }
+    public Vector2i boundsSize { get; private set; }
 
     //public properties
     public PersistentListDestroyable<Particle> particles;
@@ -24,36 +34,45 @@ public class ParticleSystem : IDisposable
     public uint[] colorsCPU;
     
     public PersistentListDestroyable<ParticleLink> particleLinks;
-    public PersistentList<int4> linksCPU;
     public PersistentList<float> linkStrainCPU;
     public int nextLinkID = 0;
-    public const float linkStrength = 50;
+    public const float linkStrength = 1;
 
 
     // private properties
     public GridAccess grid;
-    readonly float cellDivisor = 3f;
 
     // shader properties
     readonly ReadWriteBuffer<float2> positions;
     readonly ReadWriteBuffer<float2> lastPositions;
     readonly ReadWriteBuffer<float> travelDistances;
-    ReadOnlyBuffer<int4> links;
-    ReadWriteBuffer<float> linkStrain;
+    readonly ReadWriteBuffer<float> linkStrain;
     readonly ReadOnlyBuffer<uint> colors;
     readonly ReadOnlyBuffer<int> active;
+
+    public readonly ReadWriteBuffer<int> linkKeys;
+    public readonly ReadWriteBuffer<int3> links;
+    public int3[] linksArray;
+    private int[] linkKeysArray;
+
+
 
     public Vector2f gravity = new(0, 0);
     public float antiPressurePower = 0.25f;
     public int iterations = 5;
 
+    private const float cellDivisor = 5;
 
-   readonly Stopwatch timer = new();
 
-    public ParticleSystem(int maxParticles, int width, int height, float radius)
+    readonly Stopwatch timer = new();
+
+    public Thread buildDataThread;
+
+    public ParticleSystem(int maxParticles, int maxLinks, int width, int height, float radius)
     {
         this.maxParticles = maxParticles;
-        this.worldExtents = new Vector2i(width, height);
+        this.maxLinks = maxLinks;
+        this.boundsSize = new Vector2i(width, height);
         this.particleRadius = radius;
 
         var col = Enumerable.Repeat(0xFFFFFFFF, maxParticles).ToArray();
@@ -61,19 +80,23 @@ public class ParticleSystem : IDisposable
         positions = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<float2>(maxParticles);
         lastPositions = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<float2>(maxParticles);
         travelDistances = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<float>(maxParticles);
-        links = GraphicsDevice.GetDefault().AllocateReadOnlyBuffer<int4>(maxParticles*2);
-        linkStrain = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<float>(maxParticles*2);
         colors = GraphicsDevice.GetDefault().AllocateReadOnlyBuffer<uint>(col);
         active = GraphicsDevice.GetDefault().AllocateReadOnlyBuffer<int>(maxParticles);
+
+        linkStrain = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<float>(maxLinks);
+        linkKeys = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<int>(maxParticles*maxLinksPerParticle);
+        links = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<int3>(maxLinks);
 
         positionsCPU = new float2[maxParticles];
         lastPositionsCPU = new float2[maxParticles];
         colorsCPU = col;
 
         particles = new PersistentListDestroyable<Particle>(maxParticles, maxParticles, true, true);
-        particleLinks = new PersistentListDestroyable<ParticleLink>(maxParticles/2, maxParticles * 2, true, false);
-        linksCPU = new PersistentList<int4>(maxParticles/2, maxParticles * 2, true, false);
-        linkStrainCPU = new PersistentList<float>(maxParticles/2, maxParticles * 2, true, false);
+        particleLinks = new PersistentListDestroyable<ParticleLink>(maxParticles/4, maxLinks, true, false);
+        linkStrainCPU = new PersistentList<float>(maxParticles/4, maxLinks, true, true);
+        linksArray = Enumerable.Repeat(new int3(-1, -1, -1), maxLinks).ToArray();
+        linkKeysArray = Enumerable.Repeat(-1, maxParticles*maxLinksPerParticle).ToArray();
+
 
         Vector2i cellCount = new Vector2i((int)((width/(radius*2))/cellDivisor), (int)((height/(radius*2))/cellDivisor));
         grid = new GridAccess(cellCount, new Vector2i(width, height), maxParticles);
@@ -82,12 +105,71 @@ public class ParticleSystem : IDisposable
     public Particle AddParticle(Vector2f position, Color? color = null)
     {
         var c = color ?? Color.White;
-        return new Particle(position, c, this);
+        var p = new Particle(position, c, this);
+        return p;
+    }
+
+    public Particle AddParticle(Particle particle, Vector2f position, Color color)
+    {
+        if(particle.initialized) return particle;
+
+        lock(particles) particles.Add(particle);
+        lock(positionsCPU) positionsCPU[particle.ID] = position.ToFloat2();
+        lock(lastPositionsCPU) lastPositionsCPU[particle.ID] = position.ToFloat2();
+        lock(colorsCPU) colorsCPU[particle.ID] = color.ToUInt32();
+        
+        particleCount++;
+
+        return particle;
+    }
+
+    public void RemoveParticle(Particle particle)
+    {
+        lock(particles) particles.Remove(particle);
+        for(int i = 0; i < particle.links.Count;)
+        {
+            particle.links[i].Destroy();
+        }
+        particleCount--;
+    }
+
+    public void AddLink(ParticleLink link)
+    {
+        if (link.initialized) return;
+
+        lock(link.particle1.linkedParticles) link.particle1.linkedParticles.Add(link.particle2);
+        lock(link.particle2.linkedParticles) link.particle2.linkedParticles.Add(link.particle1);
+
+        lock(link.particle1.links) link.particle1.links.Add(link);
+        lock(link.particle2.links) link.particle2.links.Add(link);
+
+        lock(particleLinks) particleLinks.Add(link);
+        lock(linksArray) linksArray[link.ID] = link.IntLink;
+        lock(linkKeysArray) linkKeysArray[link.particle1.ID*maxLinksPerParticle + link.particle1.links.Count - 1] = link.ID;
+        lock(linkKeysArray) linkKeysArray[link.particle2.ID*maxLinksPerParticle + link.particle2.links.Count - 1] = link.ID;
+        lock(linkStrainCPU) linkStrainCPU.Add(0);
+        linkCount++;
+    }
+
+    public void RemoveLink(ParticleLink link)
+    {
+        lock(link.particle1.linkedParticles) link.particle1.linkedParticles.Remove(link.particle2);
+        lock(link.particle2.linkedParticles) link.particle2.linkedParticles.Remove(link.particle1);
+        
+        lock(link.particle1.links) link.particle1.links.Remove(link);
+        lock(link.particle2.links) link.particle2.links.Remove(link);
+
+        lock(particleLinks) particleLinks.Remove(link);
+        lock(linksArray) linksArray[link.ID] = new int3(-1, -1, -1);
+        lock(linkKeysArray) linkKeysArray[link.particle1.ID*maxLinksPerParticle + link.particle1.links.Count] = -1;
+        lock(linkKeysArray) linkKeysArray[link.particle2.ID*maxLinksPerParticle + link.particle2.links.Count] = -1;
+        lock(linkStrainCPU) linkStrainCPU.Remove(link.ID);
+        linkCount--;
     }
 
     public void RegenerateGrid()
     {
-        Vector2i cellCount = new Vector2i((int)((worldExtents.X/(particleRadius*2))/cellDivisor), (int)((worldExtents.Y/(particleRadius*2))/cellDivisor));
+        Vector2i cellCount = new Vector2i((int)((boundsSize.X/(particleRadius*2))/cellDivisor), (int)((boundsSize.Y/(particleRadius*2))/cellDivisor));
         grid.SetCellCount(cellCount);
     }
 
@@ -117,14 +199,8 @@ public class ParticleSystem : IDisposable
         return active;
     }
 
-    public ReadOnlyBuffer<int4> GetGPULinks()
-    {
-        return links;
-    }
-
     public ReadOnlySpan<int> GetParticlesInGridAtPosition(Vector2f position)
     {
-        
         var gridIndex = grid.GetIndex(position);
         var gridValueCount = grid.gridValueCountsArray[gridIndex];
         var gridValueStart = grid.gridKeysArray[gridIndex];
@@ -140,41 +216,72 @@ public class ParticleSystem : IDisposable
         return grid.gridValuesArray.AsSpan(gridValueStart, gridValueCount);
     }
 
-    public MovingAverage gridTime = new(100);
-    public MovingAverage collisionTime = new(100);
-    public MovingAverage linkTime = new(100);
-    public MovingAverage copyTime = new(100);
-    public MovingAverage totalUpdateTime = new(10);
 
+
+    public MovingAverage gridTime = new(10);
+    public MovingAverage collisionTime = new(10);
+    public MovingAverage linkTime = new(10);
+    public MovingAverage strainTime = new(10);
+    public MovingAverage copyTime = new(10);
+    public MovingAverage waitTime = new(10);
+    public MovingAverage totalSolveTime = new(4);
+    public MovingAverage totalBuildTime = new(4);
+
+    public void BuildData()
+    {
+        timer.Restart();
+        var linkActive = linkStrainCPU.GetActiveArray();
+        for(int i = 0; i < linkStrainCPU.Capacity; i++)
+        {
+            if(linkActive[i] == 1 && linkStrainCPU[i] > linkStrength)
+            {
+                particleLinks[i].Destroy();
+            }
+        }
+        timer.Stop();
+        strainTime.Add(timer.ElapsedMilliseconds);
+
+
+
+        timer.Restart();
+        RegenerateGrid();
+        grid.BuildGridThreaded(positionsCPU, particles.GetActiveArray(), Environment.ProcessorCount);
+        timer.Stop();
+        gridTime.Add(timer.ElapsedMilliseconds);
+
+        totalBuildTime.Add(gridTime + linkTime + strainTime);
+    }
+
+    int lastLinksCount = -1;
     public void SolveParticles(float dt)
     {
+        BuildData();
+
+        timer.Restart();
         lock(positionsCPU) positions.CopyFrom(positionsCPU);
         lock(lastPositionsCPU) lastPositions.CopyFrom(lastPositionsCPU);
         lock(active) active.CopyFrom(particles.GetActiveArray());
-
-        timer.Restart();
-
-        // --------------------------
-        RegenerateGrid();
-        grid.BuildGridThreaded(positionsCPU, particles.GetActiveArray());
-        // --------------------------
-        
+        lock(linkKeysArray) linkKeys.CopyFrom(linkKeysArray);
+        lock(linksArray) links.CopyFrom(linksArray);
+    
         timer.Stop();
-        gridTime.Add(timer.ElapsedMilliseconds);
+        float copyTimeTemp = timer.ElapsedMilliseconds;
     
         timer.Restart();
-        // --------------------------
-        GraphicsDevice.GetDefault().For(maxParticles, new IntegrationKernel
+        GraphicsDevice.GetDefault().For(maxParticles, 1, 1, 1024, 1, 1, new IntegrationKernel
         (
             positions, 
             lastPositions, 
             travelDistances,
             active,
             grid.gridValues, 
-            grid.gridValueCounts,
             grid.gridKeys,
+            linkKeys,
+            links,
+            maxLinksPerParticle,
+            linkStrain,
             particleRadius, 
-            worldExtents.ToInt2(), 
+            boundsSize.ToInt2(), 
             grid.cellCount.ToInt2(),
             grid.cellCountLinear,
             grid.cellSize.ToFloat2(),
@@ -183,56 +290,19 @@ public class ParticleSystem : IDisposable
             antiPressurePower,
             iterations
         ));
-
         timer.Stop();
         collisionTime.Add(timer.ElapsedMilliseconds);
 
-        timer.Restart();
-        // --------------------------
-        lock(linksCPU)
-        {
-            if(linksCPU.Count > 0)
-            {
-                if(linksCPU.Count >= links.Length)
-                {
-                    links.Dispose();
-                    links = GraphicsDevice.GetDefault().AllocateReadOnlyBuffer<int4>((int)MathF.Ceiling(linksCPU.Count * 1.33f));
-                    
-                    linkStrain.Dispose();
-                    linkStrain = GraphicsDevice.GetDefault().AllocateReadWriteBuffer<float>((int)MathF.Ceiling(linksCPU.Count * 1.33f));
-                }
-                
-                lock(linksCPU) links.CopyFrom(linksCPU.ToArray());
-                lock(linkStrainCPU) linkStrain.CopyFrom(linkStrainCPU.ToArray());
 
-                GraphicsDevice.GetDefault().For(linksCPU.Count, new LinkKernel(links, positions, linkStrain, particleRadius, dt));
 
-                lock(linkStrainCPU) linkStrain.CopyTo(linkStrainCPU.GetArray());
-                
-
-                lock(linkStrainCPU) lock(particleLinks) lock(linksCPU)
-                {
-                    for(var i = 0; i < linkStrainCPU.Count; i++)
-                    {
-                        if(linksCPU[i].W == 1 && linkStrainCPU[i] > linkStrength)
-                        {
-                            particleLinks[i].Destroy();
-                        }
-                    }
-                }
-            }
-        }
-
-        timer.Stop();
-        linkTime.Add(timer.ElapsedMilliseconds);
-        
         timer.Restart();
         positions.CopyTo(positionsCPU);
         lastPositions.CopyTo(lastPositionsCPU);
+        linkStrain.CopyTo(linkStrainCPU.ToArray());
         timer.Stop();
-        copyTime.Add(timer.ElapsedMilliseconds);
+        copyTime.Add(copyTimeTemp + timer.ElapsedMilliseconds);
 
-        totalUpdateTime.Add(gridTime + collisionTime + linkTime + copyTime);
+        totalSolveTime.Add(collisionTime + copyTime);
     }
 
     public Particle? Raycast(Vector2f origin, Vector2f direction, float maxDistance, out List<Vector2f> gridIntersections)
@@ -282,10 +352,11 @@ public class ParticleSystem : IDisposable
         positions.Dispose();
         lastPositions.Dispose();
         travelDistances.Dispose();
-        links.Dispose();
         colors.Dispose();
         active.Dispose();
         grid.Dispose();
+        linkKeys.Dispose();
+        linkStrain.Dispose();
     }
 }
 

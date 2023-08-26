@@ -8,24 +8,31 @@ using ParticlePhysics;
 
 public static class Application
 {
-    public static Loop update = EngineLoop.CreateLoop("Update", 60, false);
-    public static Loop physicsUpdate = EngineLoop.CreateLoop("Physics", 60, false);
-    public static Loop draw = EngineLoop.CreateLoop("Draw", 30, false);
+    public static readonly Loop update = EngineLoop.CreateLoop("Update", 60, false);
+    public static readonly Loop physicsUpdate = EngineLoop.CreateLoop("Physics", 60, false);
+    public static readonly Loop draw = EngineLoop.CreateLoop("Draw", 30, false);
 
-    public static Canvas canvas;
-    public static ParticleSystem particleSystem;
-    public static Camera camera;
+    private static Screen? screen;
+    private static ParticleSystem? particleSystem;
+    private static Camera? camera;
 
-    static Particle lastParticle = null;
+    static Particle? lastParticle = null;
 
     private static Vector3f newColor = new(0.5f, 0.5f, 0.5f);
     private static Vector3f colorDirection = new(-0.04f, 0.03f, 0.02f);
-    static void PhysicsUpdate(float dt)
+    
+    private static void PhysicsUpdate(float dt)
     {
+        if(screen == null || particleSystem == null || camera == null) {
+            throw new Exception("Screen, particleSystem or camera is null");
+        }
+
         if(Keyboard.IsKeyPressed(Keyboard.Key.Space))
         {
-            dt = dt / 10f;
+            dt /= 10f;
         }
+
+        float brushSize = particleSystem.boundsSize.X / 5f;
 
         var random = new Random();
         if(Mouse.IsButtonPressed(Mouse.Button.Left) && !GUIManager.IsMouseCapturedByUI())
@@ -38,10 +45,9 @@ public static class Application
             newColor += colorDirection;
             Color c = new Color((byte)(newColor.X * 255), (byte)(newColor.Y * 255), (byte)(newColor.Z * 255));
 
-
-            for(int i = 0; i < 5; i++)
+            for(int i = 0; i < 50; i++)
             {
-                var mousePositionNext = camera.ScreenToWorld((Vector2f)canvas.GetMousePosition() + new Vector2f(random.NextSingle() * 200 - 100, random.NextSingle() * 200 - 100));
+                var mousePositionNext = screen.ScreenToWorld(screen.mousePosition + new Vector2f(random.NextSingle() * 10 - 5, random.NextSingle() * 10 - 5));
                 var position = mousePositionNext;
                 if(lastParticle != null)
                 {
@@ -68,23 +74,26 @@ public static class Application
             newColor += colorDirection;
             Color c = new Color((byte)(newColor.X * 255), (byte)(newColor.Y * 255), (byte)(newColor.Z * 255));
 
-            for(int i = 0; i < 1000; i++)
+            float spacing = particleSystem.particleRadius * 12;
+            for(int i = 0; i < MathF.Pow(brushSize / spacing, 2); i++)
             {
-                var topLeft = particleSystem.AddParticle(camera.ScreenToWorld(canvas.GetMousePosition()) + new Vector2f(random.NextSingle() * 400 - 200, random.NextSingle() * 400 - 200), c);
-                // var topRight = particleSystem.AddParticle(topLeft.PositionF + new Vector2f(particleSystem.particleRadius * 2, 0), c);
-                // var bottomLeft = particleSystem.AddParticle(topLeft.PositionF + new Vector2f(0, particleSystem.particleRadius * 2), c);
+                // place particles on a grid centered on the mouse not randomly
+                Vector2f position = screen.ScreenToWorld(screen.mousePosition) - new Vector2f(brushSize / 2, brushSize / 2) + new Vector2f((i % (brushSize / spacing)) * spacing, MathF.Floor(i / (brushSize / spacing)) * spacing);
+                var topLeft = particleSystem.AddParticle(position, c);
+                var topRight = particleSystem.AddParticle(topLeft.PositionF + new Vector2f(particleSystem.particleRadius * 2, 0), c);
+                var bottomLeft = particleSystem.AddParticle(topLeft.PositionF + new Vector2f(0, particleSystem.particleRadius * 2), c);
                 
-                // var diagonal = new Vector2f(particleSystem.particleRadius * 2, particleSystem.particleRadius * 2);
-                // var bottomRight = particleSystem.AddParticle(topLeft.PositionF + diagonal, c);
+                var diagonal = new Vector2f(particleSystem.particleRadius * 2, particleSystem.particleRadius * 2);
+                var bottomRight = particleSystem.AddParticle(topLeft.PositionF + diagonal, c);
                 
-                // topLeft.Link(topRight, particleSystem.particleRadius * 2);
-                // topRight.Link(bottomRight, particleSystem.particleRadius * 2);
-                // bottomRight.Link(bottomLeft, particleSystem.particleRadius * 2);
-                // bottomLeft.Link(topLeft, particleSystem.particleRadius * 2);
+                topLeft.Link(topRight, particleSystem.particleRadius * 2);
+                topRight.Link(bottomRight, particleSystem.particleRadius * 2);
+                bottomRight.Link(bottomLeft, particleSystem.particleRadius * 2);
+                bottomLeft.Link(topLeft, particleSystem.particleRadius * 2);
 
-                // var diagonalLength = diagonal.Magnitude();
-                // topLeft.Link(bottomRight, diagonalLength);
-                // topRight.Link(bottomLeft, diagonalLength);
+                var diagonalLength = diagonal.Magnitude();
+                topLeft.Link(bottomRight, diagonalLength);
+                topRight.Link(bottomLeft, diagonalLength); 
             }
         }
 
@@ -122,24 +131,31 @@ public static class Application
 
     static void DrawUpdate(float dt)
     {
-        canvas.Clear();
+        if(screen == null || particleSystem == null || camera == null) {
+            throw new Exception("Screen, particleSystem or camera is null");
+        }
 
-        canvas.DrawParticleSystemBounds(particleSystem, new Color(52, 170, 134));
-        canvas.ApplyCPUDraw();
+        screen.Clear();
 
-        canvas.DrawParticleSystem(particleSystem);
-        // particleSystem.grid.DrawGrid(canvas, new Color(28, 93, 73));
-        // canvas.DrawLines(new Vector2f[] { new Vector2f(0, 0) }, new Vector2f[] { new Vector2f(100, 100) }, Color.Red);
-        canvas.ApplyGPUDraw();
+        screen.DrawParticleSystemBounds(particleSystem, new Color(52, 170, 134));
+        screen.ApplyCPUDraw();
+
+        screen.DrawParticleSystem(particleSystem);
+        screen.ApplyGPUDraw();
     }
 
     static void MainUpdate(float dt)
     {
+        if(screen == null || particleSystem == null || camera == null) {
+            throw new Exception("Screen, particleSystem or camera is null");
+        }
+
         camera.UpdatePanning(Mouse.Button.Middle);
         camera.UpdateZooming();
+        
 
         // Vector2f centerOfArea = (Vector2f)(particleSystem.grid.extents / 2);
-        // Vector2f mousePosition = camera.ScreenToWorld((Vector2f)canvas.GetMousePosition());
+        // Vector2f mousePosition = camera.ScreenToWorld((Vector2f)screen.GetMousePosition());
         
         // // partitioner parallel raycasts
         // var partitioner = Partitioner.Create(0, 360, 360 / Environment.ProcessorCount);
@@ -153,7 +169,7 @@ public static class Application
         //         var distance = (mousePosition - centerOfArea).Magnitude();
         //         Particle hitParticle = particleSystem.Raycast(centerOfArea, direction, distance, out _);
                 
-        //         if(hitParticle != null) canvas.DrawLineCPU(centerOfArea, hitParticle.PositionF, Color.Red);
+        //         if(hitParticle != null) screen.DrawLineCPU(centerOfArea, hitParticle.PositionF, Color.Red);
         //         if(hitParticle != null) hitParticle.SetColor(new uint4((uint)new Random().Next(), (uint)new Random().Next(), (uint)new Random().Next(), 255));
         //     }
         // });
@@ -161,60 +177,44 @@ public static class Application
 
     static void SetupGUI()
     {
-        Panel infoPanel = new Panel(new Vector2f(10, 10), new Vector2f(200, 157.5f))
+        if(screen == null || particleSystem == null || camera == null) 
         {
-            topBarHeight = 15
+            throw new Exception("Screen, particleSystem or camera is null");
+        }
+        
+        Panel infoPanel = new Panel(new Vector2f(10, 10), 200, screen);
+
+        new UpdatableControl<string>("Update FPS: ",        infoPanel, () => EngineLoop.GetLoop("Update")?.measuredFPS.ToString("N0") ?? "0");
+        new UpdatableControl<string>("Physics FPS: ",       infoPanel, () => EngineLoop.GetLoop("Physics")?.measuredFPS.ToString("N0") ?? "0");
+        new UpdatableControl<string>("Draw FPS: ",          infoPanel, () => EngineLoop.GetLoop("Draw")?.measuredFPS.ToString("N0") ?? "0");
+        new Space(15, infoPanel);
+        new UpdatableControl<string>("Grid Time: ",         infoPanel, () => particleSystem.gridTime.ToString("N0") + " ms  -  " + (particleSystem.gridTime / particleSystem.totalBuildTime * 100).ToString("N0") + "%");
+        new UpdatableControl<string>("Link Time: ",         infoPanel, () => particleSystem.linkTime.ToString("N0") + " ms  -  " + (particleSystem.linkTime / particleSystem.totalBuildTime * 100).ToString("N0") + "%");
+        new UpdatableControl<string>("Strain Time: ",       infoPanel, () => particleSystem.strainTime.ToString("N0") + " ms  -  " + (particleSystem.strainTime / particleSystem.totalBuildTime * 100).ToString("N0") + "%");
+        new UpdatableControl<string>("Total Build Time: ",  infoPanel, () => particleSystem.totalBuildTime.ToString("N0") + " ms");
+        new Space(15, infoPanel);
+        new UpdatableControl<string>("Collision Time: ",    infoPanel, () => particleSystem.collisionTime.ToString("N0") + " ms  -  " + (particleSystem.collisionTime / particleSystem.totalSolveTime * 100).ToString("N0") + "%");
+        new UpdatableControl<string>("Copy Time: ",         infoPanel, () => particleSystem.copyTime.ToString("N0") + " ms  -  " + (particleSystem.copyTime / particleSystem.totalSolveTime * 100).ToString("N0") + "%");
+        new UpdatableControl<string>("Total Solve Time: ",  infoPanel, () => particleSystem.totalSolveTime.ToString("N0") + " ms");
+        new Space(15, infoPanel);
+        new UpdatableControl<string>("Particles: ",         infoPanel, () => particleSystem.ParticleCount.ToString("N0"));
+        new UpdatableControl<string>("Links: ",             infoPanel, () => particleSystem.LinkCount.ToString("N0"));
+
+        Panel controlPanel = new Panel(new Vector2f(10, 300), 600, screen);
+
+        // var radius = new Slider("Radius", controlPanel, (value) => particleSystem.SetRadius(value), 50f, 10,100, 1f);
+        new Slider("Anti Pressure Power", controlPanel, (value) => particleSystem.antiPressurePower = value, 0.1f, 0.01f, 2, 0.01f);
+        new Slider("Iterations", controlPanel, (value) => particleSystem.iterations = (int)value, 12, 1, 20, 1);
+        var gravity = new Vector2Slider("Gravity", controlPanel, (value) => particleSystem.gravity = value, new Vector2f(0, 0), new Vector2f(-100, -100), new Vector2f(100, 100), 1)
+        {
+            LineHeight = 150,
+            margin = new(0, 10)
         };
 
-        var updateFPSDisplay = new UpdatableControl<string>("Update FPS: ", 15, () => EngineLoop.GetLoop("Update")?.measuredFPS.ToString("N0") ?? "0");
-        infoPanel.AddControl(updateFPSDisplay);
+        gravity.getDisplayValue = () => $"({gravity.Value.X:N0}, {gravity.Value.Y:N0})";
 
-        var fixedFPSDisplay = new UpdatableControl<string>("Physics FPS: ", 15, () => EngineLoop.GetLoop("Physics")?.measuredFPS.ToString("N0") ?? "0");
-        infoPanel.AddControl(fixedFPSDisplay);
-
-        var drawFPSDisplay = new UpdatableControl<string>("Draw FPS: ", 15, () => EngineLoop.GetLoop("Draw")?.measuredFPS.ToString("N0") ?? "0");
-        infoPanel.AddControl(drawFPSDisplay);
-
-        var gridTimeDisplay = new UpdatableControl<string>("Grid Time: ", 15, () => particleSystem.gridTime.ToString("N0") + " ms  -  " + (particleSystem.gridTime / particleSystem.totalUpdateTime * 100).ToString("N0") + "%");
-        infoPanel.AddControl(gridTimeDisplay);
-
-        var collisionTimeDisplay = new UpdatableControl<string>("Collision Time: ", 15, () => particleSystem.collisionTime.ToString("N0") + " ms  -  " + (particleSystem.collisionTime / particleSystem.totalUpdateTime * 100).ToString("N0") + "%");
-        infoPanel.AddControl(collisionTimeDisplay);
-
-        var linkTimeDisplay = new UpdatableControl<string>("Link Time: ", 15, () => particleSystem.linkTime.ToString("N0") + " ms  -  " + (particleSystem.linkTime / particleSystem.totalUpdateTime * 100).ToString("N0") + "%");
-        infoPanel.AddControl(linkTimeDisplay);
-
-        var copyTimeDisplay = new UpdatableControl<string>("Copy Time: ", 15, () => particleSystem.copyTime.ToString("N0") + " ms  -  " + (particleSystem.copyTime / particleSystem.totalUpdateTime * 100).ToString("N0") + "%");
-        infoPanel.AddControl(copyTimeDisplay);
-
-        var totalUpdateTimeDisplay = new UpdatableControl<string>("Total Update Time: ", 15, () => particleSystem.totalUpdateTime.ToString("N0") + " ms");
-        infoPanel.AddControl(totalUpdateTimeDisplay);
-
-        var particleCountDisplay = new UpdatableControl<string>("Particles: ", 15, () => particleSystem.particleCount.ToString("N0"));
-        infoPanel.AddControl(particleCountDisplay);
-
-        Panel panel = new Panel(new Vector2f(10, 300), new Vector2f(600, canvas.height / 2))
-        {
-            topBarHeight = 15
-        };
-
-        var radius = new Slider(label: "Radius", height: 15, defaultValue: 3, min: 0.5f, max: 20, step: 0.1f, (value) => particleSystem.SetRadius(value));
-        panel.AddControl(radius);
-
-        var antiPressurePower = new Slider("Anti Pressure Power", 15, 0.2f, 0.01f, 2, 0.01f, (value) => particleSystem.antiPressurePower = value);
-        panel.AddControl(antiPressurePower);
-
-        var iterations = new Slider("Iterations", 15, 5, 1, 20, 1, (value) => particleSystem.iterations = (int)value);
-        panel.AddControl(iterations);
-
-        var gravity = new Vector2Slider("Gravity", 150, new Vector2f(0, 0), new Vector2f(-300, -300), new Vector2f(300, 300), 1, (value) => particleSystem.gravity = value)
-        {
-            verticalMargin = 10
-        };
-        panel.AddControl(gravity);
-
-        panel.AddControl(new Label("Click to place strings of particles", 15));
-        panel.AddControl(new Label("Right click to place a bunch of boxes made of particles.", 15));
+        new Label("Click to place strings of particles", controlPanel){margin = new(0, 20)};
+        new Label("Right click to place a bunch of boxes made of particles.", controlPanel){margin = new(0, 20)};
     }
 
 
@@ -225,14 +225,16 @@ public static class Application
 
         draw.RunActionSync(() => 
         {
-            canvas = new Canvas("Particle Sim", draw, 1920, 1080, true);
-            canvas.SetFillColor(new uint4(28, 30, 38, 255));
-            camera = new Camera(new Vector2f (1920 * 0.5f, 1080 * 0.5f), canvas);
+            screen = new Screen("Particle Sim", draw, 1920, 1080, true);
+            screen.SetFillColor(new uint4(28, 30, 38, 255));
+            camera = new Camera(new Vector2f (25000, 25000), 60, screen);
         });
 
         update.RunActionSync(() => 
         {
-            particleSystem = new ParticleSystem(1000000, canvas.width*1, canvas.width*1, 3f);
+            if(screen == null) return;
+
+            particleSystem = new ParticleSystem(1000000, 2000000, 30000, 30000, 10);
             SetupGUI();
         });
 

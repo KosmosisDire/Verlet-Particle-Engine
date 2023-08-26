@@ -1,3 +1,4 @@
+using Engine.Rendering;
 using SFML.Graphics;
 using SFML.System;
 using SFML.Window;
@@ -11,31 +12,42 @@ public class Panel
 
     public float radius = 5;
     public float borderWidth = 1;
-    public float topBarHeight = 10;
+    public float topBarHeight = 15;
 
     public Vector2f position;
     public Vector2f size;
+    public float Left => position.X;
+    public float Right => position.X + size.X;
+    public float Top => position.Y;
+    public float Bottom => position.Y + size.Y;
+
+    public float maxLabelWidth = 0;
+    public float maxValueWidth = 0;
 
     public UITheme theme;
     readonly List<Control> controls = new();
 
-    public Window onWindow;
+    public RenderWindow window;
 
-    public Panel(Window window)
+    public Panel(Vector2f position, float width, Screen screen, UITheme? colorTheme = null)
     {
-        onWindow = window;
+        theme = colorTheme ?? GUIManager.globalTheme;
+        window = screen.window;
+        size = new(width, 0);
+        this.position = position;
+        
+        GUIManager.AddPanel(this);
+        UpdateRects();
     }
 
     public void AddControl(Control control)
     {
         controls.Add(control);
-        control.onWindow = onWindow;
     }
-
 
     public void UpdateRects()
     {
-        if(topBar.IsBeingDragged(Mouse.Button.Left, onWindow))
+        if(topBar.IsBeingDragged(Mouse.Button.Left, window))
         {
             position += MouseGestures.mouseDelta;
         }
@@ -54,26 +66,27 @@ public class Panel
         topBar.OutlineThickness = borderWidth;
     }
 
-    public Panel(Vector2f position, Vector2f size, UITheme? colorTheme = null)
-    {
-        theme = colorTheme ?? GUIManager.globalTheme;
-        this.position = position;
-        this.size = size;
-        GUIManager.AddPanel(this);
-        UpdateRects();
-    }
-
-    public void Draw(RenderWindow window)
+    public void Draw()
     {
         window.Draw(background);
         window.Draw(topBar);
 
-        float height = 0;
+        float yOffset = 0;
+        float maxLabelWidthTemp = 0;
+        float maxValueWidthTemp = 0;
+        
         foreach (Control control in controls)
         {
-            control.Draw(window, this, height);
-            height += control.height + control.verticalMargin * 2;
+            control.Draw(yOffset);
+            yOffset += control.TotalHeight;
+
+            if (control.LabelWidth > maxLabelWidthTemp && control is not Label) maxLabelWidthTemp = control.LabelWidth;
+            if (control is ValuedControl valuedControl && valuedControl.ValueTextWidth > maxValueWidthTemp) maxValueWidthTemp = valuedControl.ValueTextWidth;
         }
+
+        maxLabelWidth = maxLabelWidthTemp;
+        maxValueWidth = maxValueWidthTemp;
+        size.Y = yOffset + topBarHeight;
     }
 
     public bool ContainsPoint(Vector2f point)
@@ -88,9 +101,9 @@ public class Panel
 
     public bool IsMouseCaptured()
     {
-        if(topBar.IsBeingDragged(Mouse.Button.Left, onWindow)) return true;
+        if(topBar.IsBeingDragged(Mouse.Button.Left, window)) return true;
         
-        for (var i = 0; i < controls.Count; i++)
+        for (int i = 0; i < controls.Count; i++)
         {
             if(controls[i].IsMouseCaptured())
             {
