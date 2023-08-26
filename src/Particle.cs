@@ -40,7 +40,7 @@ public class Particle : IHasID, IDestroyable
         new ParticleLink(this, other, length);
     }
 
-    public List<Particle> GetLinkedParticles(bool recursive = false, bool includeThis = false, List<Particle> list = null)
+    public List<Particle> GetLinkedParticles(bool recursive = false, bool includeThis = false, List<Particle>? list = null)
     {
         if(!recursive) return linkedParticles;
 

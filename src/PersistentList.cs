@@ -86,6 +86,7 @@ public class PersistentList<T> : IEnumerable
     public void Remove(int id)
     {
         reusableIDs.Enqueue(id);
+        #pragma warning disable CS8601
         items[id] = default;
         if(buildActiveList)
             active[id] = 0;

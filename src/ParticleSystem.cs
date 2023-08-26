@@ -53,7 +53,7 @@ public class ParticleSystem : IDisposable
     public readonly ReadWriteBuffer<int> linkKeys;
     public readonly ReadWriteBuffer<int3> links;
     public int3[] linksArray;
-    private int[] linkKeysArray;
+    private readonly int[] linkKeysArray;
 
 
 
@@ -63,10 +63,8 @@ public class ParticleSystem : IDisposable
 
     private const float cellDivisor = 5;
 
-
     readonly Stopwatch timer = new();
 
-    public Thread buildDataThread;
 
     public ParticleSystem(int maxParticles, int maxLinks, int width, int height, float radius)
     {
@@ -252,7 +250,6 @@ public class ParticleSystem : IDisposable
         totalBuildTime.Add(gridTime + linkTime + strainTime);
     }
 
-    int lastLinksCount = -1;
     public void SolveParticles(float dt)
     {
         BuildData();
@@ -316,7 +313,7 @@ public class ParticleSystem : IDisposable
         {
             for (int i = 0; i < gridIndicies.Count; i++)
             {
-                Particle closestParticle = null;
+                Particle? closestParticle = null;
                 float closestDistance = float.MaxValue;
 
                 var index = gridIndicies[i];
